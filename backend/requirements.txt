@@ -1,0 +1,12 @@
+# Respaldo para pip (la fuente de verdad es pyproject.toml, gestionado con uv)
+# Uso: python -m pip install -r requirements.txt
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.6
+alembic==1.20.1
+pydantic-settings==2.16.2
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+PyJWT==2.15.1
+email-validator==2.3.0
+python-multipart==0.0.33

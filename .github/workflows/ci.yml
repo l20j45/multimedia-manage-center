@@ -1,0 +1,149 @@
+# CI multiplataforma: lint/tests del backend, build del frontend y
+# compilación nativa del app en Windows, macOS y Linux.
+#
+# - En cada push/PR: backend (ruff + pytest) y frontend (tsc + vite build).
+# - En pushes a main: además se compila el binario nativo en los 3 SO
+#   y se suben los instaladores como artifacts.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------- backend
+  backend:
+    name: Backend (ruff + pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+
+      - name: Instalar dependencias (uv sync)
+        run: uv sync
+
+      - name: Lint + formato (Ruff)
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Tests (pytest)
+        run: uv run pytest -q
+
+  # --------------------------------------------------------------- frontend
+  frontend:
+    name: Frontend (vitest + tsc + vite build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          # El lockfile vive en frontend/, no en la raíz del repo
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Tests (vitest)
+        run: pnpm test
+
+      - name: Typecheck + build
+        run: pnpm run build
+
+  # ------------------------------------------------------------ imagen Docker
+  docker:
+    name: Backend en Docker (docker build)
+    needs: backend
+    # Solo en pushes a main: valida que la imagen del backend compila
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build de la imagen
+        run: docker build backend -t api-check
+
+  # --------------------------------------------------- build nativo (3 SO)
+  tauri:
+    name: Build nativo (${{ matrix.os }})
+    needs: [backend, frontend]
+    # Los compilados nativos pesan mucho (minutos de CI y pools saturados
+    # como macOS arm64): solo bajo demanda — corre con un tag v* o a mano
+    # desde la pestaña Actions ("Run workflow"). Los PRs y pushes a main
+    # validan con los dos jobs anteriores.
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Instalar Rust estable
+        uses: dtolnay/rust-toolchain@stable
+
+      # Cachea los crates de Rust para que las builds siguientes tarden menos
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri
+
+      - name: Dependencias de sistema (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Compilar app nativa e instaladores
+        run: pnpm run tauri build
+
+      - name: Subir instaladores como artifact
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: instaladores-${{ matrix.os }}
+          path: |
+            frontend/src-tauri/target/release/bundle/**/*
+          retention-days: 14

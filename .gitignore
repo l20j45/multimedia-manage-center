@@ -1,0 +1,29 @@
+# --- Python / backend ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.db
+*.sqlite3
+
+# --- Node / frontend ---
+node_modules/
+dist/
+
+# --- Certificados de firma Android ---
+*.keystore
+
+# --- Rust / Tauri ---
+**/src-tauri/target/
+**/src-tauri/gen/
+
+# --- Graphify (grafo de conocimiento generado por IA) ---
+# Solo el output local en la raíz; el kit pre-trenzado ai-kit/graphify-out/ SÍ se commitea.
+/graphify-out/
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

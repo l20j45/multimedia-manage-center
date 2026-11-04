@@ -1,0 +1,22 @@
+# API FastAPI en Docker (solo backend: FastAPI + SQLite).
+# El nombre de la imagen y el puerto vienen del .env RAÍZ (compose lo lee
+# automáticamente para interpolar ${VARS}); el runtime usa las vars de backend/.
+# La BD vive en un volumen persistente en /app/data (docker compose up desde la raíz).
+
+services:
+  api:
+    build: ./backend
+    image: ${PROJECT_SLUG:-biblioteca-recursos-multimedia}-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    env_file:
+      - backend/.env
+    environment:
+      # Ruta de la BD dentro del contenedor (volumen persistente)
+      DATABASE_URL: sqlite:////app/data/app.db
+    volumes:
+      - api-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  api-data:

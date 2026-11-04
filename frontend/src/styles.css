@@ -1,0 +1,121 @@
+:root {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color-scheme: light;
+  color: #1f2937;
+  background-color: #f8fafc;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+.card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 2rem;
+  width: min(360px, 90vw);
+  box-shadow: 0 4px 24px rgb(0 0 0 / 0.06);
+}
+
+.card h1 { margin: 0 0 0.25rem; font-size: 1.35rem; }
+.card p.sub { margin: 0 0 1.25rem; color: #6b7280; font-size: 0.9rem; }
+
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.tabs button {
+  flex: 1;
+  padding: 0.45rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.tabs button.active {
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  color: white;
+  border-color: transparent;
+}
+
+input {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+input:focus { outline: 2px solid #6366f1; border-color: transparent; }
+
+button.primary {
+  width: 100%;
+  padding: 0.6rem;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+button.primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.error { color: #dc2626; font-size: 0.85rem; margin: 0.25rem 0; }
+.ok { color: #059669; font-size: 0.85rem; margin: 0.25rem 0; }
+
+.loading { color: #6b7280; font-size: 0.9rem; }
+
+/* --- Home (índice tras iniciar sesión) --- */
+.home {
+  width: min(680px, 92vw);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+}
+
+.topbar h1 { margin: 0; font-size: 1.3rem; }
+
+button.ghost {
+  padding: 0.45rem 0.8rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+button.ghost:hover { background: #f3f4f6; }
+
+.profile p { margin: 0.4rem 0; }
+.label { color: #6b7280; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+
+.link {
+  margin-top: 0.75rem;
+  background: none;
+  border: none;
+  color: #4f46e5;
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.link:hover { color: #3730a3; }
