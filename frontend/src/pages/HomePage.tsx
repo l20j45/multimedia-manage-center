@@ -3,8 +3,10 @@ import {
   addCollectionItem,
   bulkMedia,
   createCollection,
+  deleteCollection,
   deleteMedia,
   exportUrl,
+  getAutotagSuggestions,
   listCollections,
   listDuplicates,
   listMedia,
@@ -13,8 +15,6 @@ import {
   purgeMedia,
   removeCollectionItem,
   restoreMedia,
-  rethumbMedia,
-  trimMedia,
   updateMe,
   updateMedia,
   uploadMedia,
@@ -24,14 +24,16 @@ import {
   type MediaQuery,
   type User,
 } from "../lib/api";
+import DetailPanel from "./DetailPanel";
 
-type TabKey = "all" | MediaKind | "trash";
+type NavKey = "all" | MediaKind | "trash" | "collections";
 
-const TABS: { key: TabKey; label: string; icon: string }[] = [
+const NAV_MAIN: { key: NavKey; label: string; icon: string }[] = [
   { key: "all", label: "Todos", icon: "🗂" },
   { key: "audio", label: "Audio", icon: "🎵" },
   { key: "image", label: "Imágenes", icon: "🖼" },
   { key: "video", label: "Vídeos", icon: "🎬" },
+  { key: "collections", label: "Colecciones", icon: "📚" },
   { key: "trash", label: "Papelera", icon: "🗑" },
 ];
 
@@ -66,7 +68,7 @@ export default function HomePage({
   onChange: (user: User) => void;
   onLogout: () => void;
 }) {
-  const [tab, setTab] = useState<TabKey>("all");
+  const [nav, setNav] = useState<NavKey>("all");
   const [query, setQuery] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [activeTag, setActiveTag] = useState<string | null>(null);
@@ -76,11 +78,12 @@ export default function HomePage({
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState("");
 
-  // Filtros avanzados / vistas
+  // Filtros / vistas
   const [scope, setScope] = useState<"mine" | "team">("mine");
   const [order, setOrder] = useState<NonNullable<MediaQuery["order"]>>("created");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
   const [view, setView] = useState<"grid" | "list">("grid");
+  const [minRating, setMinRating] = useState(false);
 
   // Subida
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -93,9 +96,18 @@ export default function HomePage({
   const [uploadPct, setUploadPct] = useState(0);
   const [uploadMsg, setUploadMsg] = useState("");
 
-  // Drag & drop de varios archivos
+  // Drag & drop
   const [dragging, setDragging] = useState(false);
   const [bulkMsg, setBulkMsg] = useState("");
+
+  // Auto-tag sugerencias (nunca se aplican solas)
+  const [suggestions, setSuggestions] = useState<{
+    id: number;
+    title: string;
+    baseTags: string[];
+    suggestions: string[];
+    source: string;
+  } | null>(null);
 
   // Colecciones
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -109,7 +121,8 @@ export default function HomePage({
   const [bulkColId, setBulkColId] = useState<number | "">("");
   const [bulkBusy, setBulkBusy] = useState(false);
 
-  // Edición / reproductor / duplicados
+  // Detalle / duplicados / edición
+  const [detail, setDetail] = useState<MediaItem | null>(null);
   const [editing, setEditing] = useState<MediaItem | null>(null);
   const [editDraft, setEditDraft] = useState({
     title: "",
@@ -119,11 +132,6 @@ export default function HomePage({
     proyecto: "",
     visibility: "private" as "private" | "team",
   });
-  const [playing, setPlaying] = useState<MediaItem | null>(null);
-  const [trimIn, setTrimIn] = useState<number | null>(null);
-  const [trimOut, setTrimOut] = useState<number | null>(null);
-  const [trimBusy, setTrimBusy] = useState(false);
-  const [minRating, setMinRating] = useState(false);
   const [dupesOpen, setDupesOpen] = useState(false);
   const [dupes, setDupes] = useState<MediaItem[][]>([]);
 
@@ -135,9 +143,9 @@ export default function HomePage({
 
   const fileInput = useRef<HTMLInputElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
 
   /* ------------------------------------------------------ carga de datos */
+  const inTrash = nav === "trash";
   const queryBase = useMemo(
     () => ({
       q: debouncedQ || undefined,
@@ -146,38 +154,29 @@ export default function HomePage({
       order,
       direction,
       min_rating: minRating ? 3 : null,
-      kind: (tab === "all" || tab === "trash" ? undefined : tab) as
+      kind: (nav === "all" || nav === "trash" || nav === "collections" ? undefined : nav) as
         | MediaKind
         | undefined,
     }),
-    [debouncedQ, activeTag, scope, order, direction, tab, minRating],
+    [debouncedQ, activeTag, scope, order, direction, nav, minRating],
   );
 
   const loadItems = useCallback(
     async (offset = 0, replace = true) => {
-      const isTrash = tab === "trash";
-      if (selectedCol) {
-        // la vista de colección usa el filtro collection (papelera no aplica)
-        const res = await listMedia({
-          ...queryBase,
-          collection: selectedCol.id,
-          limit: PAGE_SIZE,
-          offset,
-        });
-        setItems((prev) => (replace ? res.items : [...prev, ...res.items]));
-        setTotal(res.total);
+      let res;
+      if (selectedCol && !inTrash && nav !== "collections") {
+        res = await listMedia({ ...queryBase, collection: selectedCol.id, limit: PAGE_SIZE, offset });
+      } else if (nav === "collections") {
+        setItems([]);
+        setTotal(0);
         return;
+      } else {
+        res = await listMedia({ ...queryBase, trash: inTrash, limit: PAGE_SIZE, offset });
       }
-      const res = await listMedia({
-        ...queryBase,
-        trash: isTrash,
-        limit: PAGE_SIZE,
-        offset,
-      });
       setItems((prev) => (replace ? res.items : [...prev, ...res.items]));
       setTotal(res.total);
     },
-    [queryBase, tab, selectedCol],
+    [queryBase, nav, selectedCol, inTrash],
   );
 
   const loadTags = useCallback(async () => {
@@ -199,9 +198,7 @@ export default function HomePage({
   useEffect(() => {
     setLoading(true);
     loadItems(0, true)
-      .catch((err: unknown) =>
-        setListError(err instanceof Error ? err.message : "Error al cargar"),
-      )
+      .catch((err: unknown) => setListError(err instanceof Error ? err.message : "Error al cargar"))
       .finally(() => setLoading(false));
     setSelectedIds(new Set());
   }, [loadItems]);
@@ -211,14 +208,12 @@ export default function HomePage({
     loadCollections();
   }, [loadTags, loadCollections]);
 
-  // Debounce de búsqueda
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(query.trim()), 300);
     return () => clearTimeout(t);
   }, [query]);
 
-  const hasMore = items.length < total && !loading;
-
+  const hasMore = items.length < total && !loading && nav !== "collections";
   const loadMore = useCallback(async () => {
     setLoading(true);
     try {
@@ -228,7 +223,6 @@ export default function HomePage({
     }
   }, [loadItems, items.length]);
 
-  // Scroll infinito
   const sentinel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!sentinel.current || !hasMore) return;
@@ -243,8 +237,6 @@ export default function HomePage({
   }, [hasMore, loadMore]);
 
   /* ------------------------------------------------------------- helpers */
-  const inTrash = tab === "trash";
-
   function toggleSelect(id: number) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -292,6 +284,7 @@ export default function HomePage({
     if (!window.confirm(`¿Enviar "${item.title}" a la papelera?`)) return;
     try {
       await deleteMedia(item.id);
+      if (detail?.id === item.id) setDetail(null);
       await Promise.all([loadItems(0, true), loadTags()]);
     } catch (err) {
       setListError(err instanceof Error ? err.message : "Error al eliminar");
@@ -302,6 +295,7 @@ export default function HomePage({
     if (!window.confirm(`¿Borrar DEFINITIVAMENTE "${item.title}"? No se puede deshacer.`)) return;
     try {
       await purgeMedia(item.id);
+      if (detail?.id === item.id) setDetail(null);
       await loadItems(0, true);
     } catch (err) {
       setListError(err instanceof Error ? err.message : "Error al purgar");
@@ -317,6 +311,17 @@ export default function HomePage({
     }
   }
 
+  async function rateItem(id: number, stars: number) {
+    const target = items.find((i) => i.id === id)?.rating === stars ? 0 : stars;
+    try {
+      const updated = await updateMedia(id, { rating: target });
+      setItems((prev) => prev.map((i) => (i.id === updated.id ? { ...i, rating: updated.rating } : i)));
+      await loadTags();
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : "Error al valorar");
+    }
+  }
+
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
     if (!file) return;
@@ -324,7 +329,7 @@ export default function HomePage({
     setUploading(true);
     setUploadPct(0);
     try {
-      await uploadMedia(file, title, tagsText, setUploadPct, { description, visibility });
+      const up = await uploadMedia(file, title, tagsText, setUploadPct, { description, visibility });
       setFile(null);
       setTitle("");
       setTagsText("");
@@ -332,6 +337,19 @@ export default function HomePage({
       if (fileInput.current) fileInput.current.value = "";
       setUploadOpen(false);
       await Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
+      getAutotagSuggestions(up.id)
+        .then((r) => {
+          if (r.suggestions.length > 0) {
+            setSuggestions({
+              id: up.id,
+              title: up.title,
+              baseTags: (up.tags ?? []).slice(),
+              suggestions: r.suggestions,
+              source: r.source,
+            });
+          }
+        })
+        .catch(() => {});
     } catch (err) {
       setUploadMsg(err instanceof Error ? err.message : "Error al subir");
     } finally {
@@ -365,6 +383,61 @@ export default function HomePage({
     await Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
   }
 
+  async function doQuickUpload(f: File) {
+    setBulkMsg("");
+    try {
+      const up = await uploadMedia(f, f.name.replace(/\.[^.]+$/, ""), "", undefined, { visibility });
+      setBulkMsg(`📋 pegado y subido: ${f.name}`);
+      await Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
+      getAutotagSuggestions(up.id)
+        .then((r) => {
+          if (r.suggestions.length > 0) {
+            setSuggestions({
+              id: up.id,
+              title: up.title,
+              baseTags: (up.tags ?? []).slice(),
+              suggestions: r.suggestions,
+              source: r.source,
+            });
+          }
+        })
+        .catch(() => {});
+    } catch (err) {
+      setBulkMsg(err instanceof Error ? err.message : "Error al pegar");
+    }
+  }
+
+  /* -------------------------------------------------- sugerencias auto-tag */
+  async function applySuggestion(tag: string) {
+    if (!suggestions) return;
+    try {
+      await updateMedia(suggestions.id, { tags: [...suggestions.baseTags, tag] });
+      setSuggestions((prev) =>
+        prev
+          ? {
+              ...prev,
+              baseTags: [...prev.baseTags, tag],
+              suggestions: prev.suggestions.filter((t) => t !== tag),
+            }
+          : null,
+      );
+      await loadTags();
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : "No se pudo aplicar el tag");
+    }
+  }
+
+  async function applyAllSuggestions() {
+    if (!suggestions) return;
+    try {
+      await updateMedia(suggestions.id, { tags: [...suggestions.baseTags, ...suggestions.suggestions] });
+      setSuggestions(null);
+      await loadTags();
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : "No se pudieron aplicar los tags");
+    }
+  }
+
   /* ------------------------------------------------------------ bulk bar */
   async function runBulk(
     action: "add_tag" | "remove_tag" | "set_visibility" | "add_to_collection" | "delete" | "restore" | "purge",
@@ -392,16 +465,15 @@ export default function HomePage({
     }
   }
 
-  /* --------------------------------------------------------- colecciones */
+  /* ------------------------------------------------------------ colecciones */
   async function handleCreateCollection() {
     const name = window.prompt("Nombre de la nueva colección/edición:");
     if (!name || !name.trim()) return;
-    const isProj = window.confirm("¿Es una EDICIÓN/proyecto (poder exportar lista)? Aceptar = Sí, Cancelar = Solo colección.");
+    const isProj = window.confirm("¿Es una EDICIÓN/proyecto? Aceptar = Sí · Cancelar = Colección normal");
     setColError("");
     try {
       const col = await createCollection(name.trim(), isProj);
       setCollections((prev) => [...prev, col].sort((a, b) => a.name.localeCompare(b.name)));
-      if (selectedCol) setBulkColId(col.id);
     } catch (err) {
       setColError(err instanceof Error ? err.message : "Error al crear la colección");
     }
@@ -435,7 +507,6 @@ export default function HomePage({
     }
   }
 
-  /* ------------------------------------------------------------ duplicados */
   async function openDuplicates() {
     try {
       const res = await listDuplicates();
@@ -459,84 +530,12 @@ export default function HomePage({
     }
   }
 
-  /* ------------------------------------------------------------- player */
-  async function useThisFrame() {
-    const v = videoRef.current;
-    if (!v || !playing || playing.kind !== "video") return;
-    try {
-      const updated = await rethumbMedia(playing.id, v.currentTime);
-      const merged = { ...playing, ...updated };
-      setPlaying(merged);
-      await loadItems(0, true);
-    } catch (err) {
-      setListError(err instanceof Error ? err.message : "Error al re-generar el poster");
-    }
-  }
-
-  function resetTrim() {
-    setTrimIn(null);
-    setTrimOut(null);
-  }
-
-  async function cutSegment() {
-    if (!playing || playing.kind === "image") return;
-    if (trimIn === null || trimOut === null) {
-      setListError("Marca primero In (I) y Out (O).");
-      return;
-    }
-    if (trimOut <= trimIn) {
-      setListError("Out debe ir después de In.");
-      return;
-    }
-    setTrimBusy(true);
-    try {
-      const frag = await trimMedia(playing.id, trimIn, trimOut);
-      setPlaying(null);
-      resetTrim();
-      setBulkMsg(`✂ fragmento creado: ${frag.title}`);
-      await Promise.all([loadItems(0, true), loadTags()]);
-    } catch (err) {
-      setListError(err instanceof Error ? err.message : "Error al cortar");
-    } finally {
-      setTrimBusy(false);
-    }
-  }
-
-  async function rateItem(item: MediaItem, stars: number) {
-    const target = item.rating === stars ? 0 : stars;
-    try {
-      const updated = await updateMedia(item.id, { rating: target });
-      setItems((prev) => prev.map((i) => (i.id === updated.id ? { ...i, rating: updated.rating } : i)));
-      await loadTags();
-    } catch (err) {
-      setListError(err instanceof Error ? err.message : "Error al valorar");
-    }
-  }
-
-  function playFrom(idx: number) {
-    if (idx >= 0 && idx < items.length) setPlaying(items[idx]);
-  }
-
-  // al cambiar de reproducido reinicia los marcadores In/Out
-  useEffect(() => {
-    setTrimIn(null);
-    setTrimOut(null);
-  }, [playing?.id]);
-
-  /* ----------------------------------------------------------- shortcuts */
+  /* ------------------------------------------------------------ shortcuts */
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement;
-      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") {
-        if (e.key === "Escape") (target as HTMLInputElement).blur();
-        return;
-      }
-      if (e.key === "I" && playing && playing.kind !== "image") {
-        setTrimIn(videoRef.current?.currentTime ?? 0);
-        return;
-      }
-      if (e.key === "O" && playing && playing.kind !== "image") {
-        setTrimOut(videoRef.current?.currentTime ?? 0);
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) {
+        if (e.key === "Escape") target.blur();
         return;
       }
       if (e.key === "/") {
@@ -550,67 +549,47 @@ export default function HomePage({
         else if (profileOpen) setProfileOpen(false);
         else if (uploadOpen) setUploadOpen(false);
         else if (dupesOpen) setDupesOpen(false);
-        else if (playing) setPlaying(null);
+        else if (detail) setDetail(null);
         else if (selectedIds.size) setSelectedIds(new Set());
-        return;
-      }
-      if (playing && items.length > 1) {
-        const idx = items.findIndex((i) => i.id === playing.id);
-        if (e.key === "ArrowRight") playFrom(idx + 1);
-        if (e.key === "ArrowLeft") playFrom(idx - 1);
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, items, addItemFor, editing, profileOpen, uploadOpen, dupesOpen, selectedIds]);
+  }, [detail, addItemFor, editing, profileOpen, uploadOpen, dupesOpen, selectedIds]);
 
-  /* -------------------------------------------------- pasted desde clipboard */
+  /* puntapapel: Ctrl+V pegar directamente */
   useEffect(() => {
     function onPaste(e: ClipboardEvent) {
-      if (playing || uploadOpen || editing || addItemFor || profileOpen || dupesOpen) return;
-      const files: File[] = [];
+      if (uploadOpen || editing || addItemFor || profileOpen || dupesOpen || detail) return;
       const dt = e.clipboardData;
       if (!dt) return;
+      const files: File[] = [];
       if (dt.files && dt.files.length > 0) {
-        // archivos reales copiados desde el explorador
         Array.from(dt.files).forEach((f) => files.push(f));
       } else {
-        const itemsPaste = Array.from(dt.items ?? []);
-        for (const it of itemsPaste) {
+        Array.from(dt.items ?? []).forEach((it) => {
           if (it.kind === "file") {
             const f = it.getAsFile();
             if (f) {
-              // imagen copiada (ej. captura): dar nombre comprensible
               const ext = f.type.includes("png") ? "png" : f.type.split("/")[1] || "bin";
               files.push(new File([f], `pegado-${Date.now()}.${ext}`, { type: f.type }));
             }
           }
-        }
+        });
       }
-      const media_files = files.filter((f) => /\.(png|jpe?g|gif|webp|avif|bmp|mp3|wav|ogg|oga|m4a|flac|aac|opus|weba|mp4|mov|webm|mkv|avi|m4v)$/i.test(f.name));
+      const media_files = files.filter((f) =>
+        /\.(png|jpe?g|gif|webp|avif|bmp|mp3|wav|ogg|oga|m4a|flac|aac|opus|weba|mp4|mov|webm|mkv|avi|m4v)$/i.test(f.name),
+      );
       if (media_files.length === 0) return;
       e.preventDefault();
-      if (media_files.length > 1) void handleDropped({ clipboardData: { files: media_files }, preventDefault() {} } as unknown as React.DragEvent);
-      else void doQuickUpload(media_files[0]);
+      for (const f of media_files) void doQuickUpload(f);
     }
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, uploadOpen, editing, addItemFor, profileOpen, dupesOpen, visibility]);
+  }, [uploadOpen, editing, addItemFor, profileOpen, dupesOpen, detail, visibility]);
 
-  async function doQuickUpload(f: File) {
-    setBulkMsg("");
-    try {
-      await uploadMedia(f, f.name.replace(/\.[^.]+$/, ""), "", undefined, { visibility });
-      setBulkMsg(`📋 pegado y subido: ${f.name}`);
-      await Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
-    } catch (err) {
-      setBulkMsg(err instanceof Error ? err.message : "Error al pegar");
-    }
-  }
-
-  /* ------------------------------------------------------------ profile */
   async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault();
     setProfileError("");
@@ -628,7 +607,7 @@ export default function HomePage({
   /* --------------------------------------------------------------- render */
   return (
     <div
-      className="home"
+      className="shell"
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);
@@ -645,30 +624,391 @@ export default function HomePage({
         </div>
       )}
 
-      <header className="topbar">
-        <h1>Biblioteca de Recursos Multimedia</h1>
-        <div className="topbar-actions">
-          <button className="ghost" onClick={openDuplicates} title="Buscar duplicados por contenido">
-            👯 Duplicados
+      {/* ==================== SIDEBAR ==================== */}
+      <aside className="sidebar">
+        <div className="brand">
+          <span className="brand-stripes" aria-hidden>
+            ▮▮▮
+          </span>
+          <span>Biblioteca <b>MM</b></span>
+        </div>
+
+        <nav className="snav">
+          {NAV_MAIN.map((t) => (
+            <button
+              key={t.key}
+              className={`snav-item${nav === t.key ? " active" : ""}`}
+              onClick={() => {
+                setNav(t.key);
+                if (t.key !== "trash" && t.key !== "collections") setActiveTag(null);
+              }}
+            >
+              {t.icon} {t.label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="snav-section">
+          <p className="snav-label">Vistas</p>
+          <button
+            className={`snav-item${minRating ? " active" : ""}`}
+            onClick={() => {
+              setMinRating((v) => !v);
+              setNav("all");
+            }}
+          >
+            ★ Favoritos
           </button>
           <button
-            className="ghost"
-            onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
-            title="Cambiar vista (grid/lista)"
+            className={`snav-item${scope === "team" ? " active" : ""}`}
+            onClick={() => setScope((s) => (s === "team" ? "mine" : "team"))}
+            title="Biblioteca propia + recursos del equipo"
           >
-            {view === "grid" ? "≡ Lista" : "▦ Grid"}
-          </button>
-          <button
-            className="ghost"
-            aria-label="Mi perfil"
-            onClick={() => setProfileOpen(true)}
-          >
-            {user.name || "Perfil"}
+            👥 Del equipo
           </button>
         </div>
-      </header>
 
-      {/* -------- overlays -------- */}
+        <div className="snav-section grow">
+          <p className="snav-label">Mis colecciones</p>
+          {collections.length === 0 && <p className="snav-empty">Crea la primera →</p>}
+          {collections.map((c) => (
+            <button
+              key={c.id}
+              className={`snav-item${selectedCol?.id === c.id && nav !== "collections" ? " active" : ""}`}
+              onClick={() => {
+                setSelectedCol(c);
+                setNav("all");
+              }}
+            >
+              {c.is_project ? "🎬" : "📚"} {c.name}
+              <span className="chip-count">{c.item_count}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="snav-bottom">
+          <button className="snav-item" onClick={openDuplicates}>
+            👯 Duplicados
+          </button>
+          <button className="snav-item" onClick={() => setProfileOpen(true)}>
+            👤 {user.name || "Perfil"}
+          </button>
+        </div>
+      </aside>
+
+      {/* ==================== MAIN ==================== */}
+      <main className="main">
+        <div className="topbar-main">
+          <input
+            className="search"
+            ref={searchInput}
+            placeholder="Búsqueda rápida...   ( / )"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="Buscar"
+          />
+          <button className="primary" onClick={() => setUploadOpen(true)}>
+            ⇪ Importar recurso
+          </button>
+        </div>
+
+        {/* ---- toolbars (solo en vistas de biblioteca) ---- */}
+        {nav !== "collections" && (
+          <>
+            <div className="lib-toolbar">
+              <select
+                aria-label="Orden"
+                value={`${order}:${direction}`}
+                onChange={(e) => {
+                  const [o, d] = e.target.value.split(":");
+                  setOrder(o as typeof order);
+                  setDirection(d as "asc" | "desc");
+                }}
+              >
+                <option value="created:desc">＋ Nuevos primero</option>
+                <option value="created:asc">－ Viejos primero</option>
+                <option value="title:asc">A → Z</option>
+                <option value="title:desc">Z → A</option>
+                <option value="size:desc">Pesados primero</option>
+                <option value="size:asc">Ligeros primero</option>
+                <option value="duration:desc">Más largos</option>
+                <option value="duration:asc">Más cortos</option>
+                <option value="rating:desc">★ Mejor valorados</option>
+              </select>
+              <select
+                aria-label="Alcance"
+                value={scope}
+                onChange={(e) => setScope(e.target.value as "mine" | "team")}
+                title="Mías (+ equipo público)"
+              >
+                <option value="mine">Mías</option>
+                <option value="team">+ Equipo</option>
+              </select>
+              {!inTrash && (
+                <select
+                  aria-label="Seleccionar colección"
+                  value={selectedCol?.id ?? ""}
+                  onChange={(e) => {
+                    const id = Number(e.target.value);
+                    setSelectedCol(collections.find((c) => c.id === id) ?? null);
+                  }}
+                >
+                  <option value="">— filtro colección —</option>
+                  {collections.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.is_project ? "🎬 " : ""}
+                      {c.name} ({c.item_count})
+                    </option>
+                  ))}
+                </select>
+              )}
+              {selectedCol && !inTrash && (
+                <>
+                  <a className="chip" href={exportUrl(selectedCol.id, "txt")} download aria-label="Exportar lista txt">
+                    ⬇ .txt
+                  </a>
+                  <a className="chip" href={exportUrl(selectedCol.id, "csv")} download aria-label="Exportar lista csv">
+                    ⬇ .csv
+                  </a>
+                </>
+              )}
+              <span className="spacer" />
+              <button
+                className="ghost"
+                onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
+                title="Cambiar vista"
+              >
+                {view === "grid" ? "≡ Lista" : "▦ Grid"}
+              </button>
+            </div>
+
+            {!inTrash && (
+              <div className="collections-bar">
+                <span className="snav-label inline">Tags</span>
+                {activeTag && (
+                  <button className="chip active" onClick={() => setActiveTag(null)} aria-label="Quitar filtro">
+                    ✕ {activeTag}
+                  </button>
+                )}
+                {tagChips
+                  .filter((c) => c.tag !== activeTag)
+                  .slice(0, 14)
+                  .map((c) => (
+                    <button key={c.tag} className="chip" onClick={() => setActiveTag(c.tag)}>
+                      {c.tag} <span className="chip-count">{c.count}</span>
+                    </button>
+                  ))}
+                {bulkMsg && <span className="ok">{bulkMsg}</span>}
+                {colError && <span className="error">{colError}</span>}
+              </div>
+            )}
+
+            {suggestions && (
+              <div className="sugg-bar">
+                <span className="snav-label inline">🤖 Sugerencias para «{suggestions.title}»</span>
+                {suggestions.suggestions.map((t) => (
+                  <button key={t} className="chip" onClick={() => applySuggestion(t)} title="Aplicar este tag">
+                    + {t}
+                  </button>
+                ))}
+                <button className="chip active" onClick={applyAllSuggestions}>
+                  ✓ aplicar todas
+                </button>
+                <button className="ghost" onClick={() => setSuggestions(null)}>
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {selectedIds.size > 0 && (
+              <div className="bulk-bar">
+                <strong>{selectedIds.size} seleccionado(s)</strong>
+                {!inTrash && (
+                  <>
+                    <input
+                      placeholder="tags del lote (coma)"
+                      value={bulkTagsText}
+                      onChange={(e) => setBulkTagsText(e.target.value)}
+                      aria-label="Tags para el lote"
+                    />
+                    <button className="chip" disabled={bulkBusy} onClick={() => runBulk("add_tag")}>＋ tags</button>
+                    <button className="chip" disabled={bulkBusy} onClick={() => runBulk("remove_tag")}>－ tags</button>
+                    <select
+                      aria-label="Colección destino del lote"
+                      value={bulkColId}
+                      onChange={(e) => setBulkColId(Number(e.target.value))}
+                    >
+                      <option value="">— añadir a colección…</option>
+                      {collections.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                    <button className="chip" disabled={bulkBusy || !bulkColId} onClick={() => runBulk("add_to_collection")}>
+                      → añadir
+                    </button>
+                    <button className="chip" disabled={bulkBusy} onClick={() => runBulk("set_visibility")}>👥 team</button>
+                    <button className="chip danger" disabled={bulkBusy} onClick={() => runBulk("delete")}>🗑 papelera</button>
+                  </>
+                )}
+                {inTrash && (
+                  <>
+                    <button className="chip" disabled={bulkBusy} onClick={() => runBulk("restore")}>↺ restaurar</button>
+                    <button className="chip danger" disabled={bulkBusy} onClick={() => runBulk("purge")}>🔥 purgar</button>
+                  </>
+                )}
+                <button className="ghost" onClick={() => setSelectedIds(new Set())}>cancelar</button>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ---- contenido principal ---- */}
+        {nav === "collections" ? (
+          <div className="collections-page">
+            <h2>Colecciones y ediciones</h2>
+            <p className="sub">📚 colección = agrupación · 🎬 proyecto de edición (exportable a .txt/.csv)</p>
+            <button className="primary" onClick={handleCreateCollection}>＋ Nueva colección</button>
+            <div className="collections-list">
+              {collections.map((c) => (
+                <div className="col-row" key={c.id}>
+                  <span className="col-name">
+                    {c.is_project ? "🎬" : "📚"} {c.name}
+                  </span>
+                  <span className="muted">{c.item_count} recurso(s)</span>
+                  <span className="spacer" />
+                  <a className="chip" href={exportUrl(c.id, "txt")} download title="Exportar .txt">⬇ txt</a>
+                  <a className="chip" href={exportUrl(c.id, "csv")} download title="Exportar .csv">⬇ csv</a>
+                  <button
+                    className="chip"
+                    onClick={() => {
+                      setSelectedCol(c);
+                      setNav("all");
+                    }}
+                  >
+                    abrir
+                  </button>
+                  <button
+                    className="chip danger"
+                    onClick={async () => {
+                      if (!window.confirm(`¿Borrar la colección "${c.name}"? (los recursos no se borran)`)) return;
+                      await deleteCollection(c.id);
+                      if (selectedCol?.id === c.id) setSelectedCol(null);
+                      await loadCollections();
+                    }}
+                  >
+                    🗑
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="lib">
+            {loading && <p className="loading">Cargando…</p>}
+            {listError && <p className="error">{listError}</p>}
+            {!loading && !listError && items.length === 0 && (
+              <div className="empty">
+                <p>
+                  {inTrash
+                    ? "La papelera está vacía."
+                    : debouncedQ || activeTag || selectedCol || minRating
+                      ? "Sin resultados. Prueba otra búsqueda o quita el filtro."
+                      : "Nada por aquí todavía. Sube, pega (Ctrl+V) o arrastra tus recursos."}
+                </p>
+              </div>
+            )}
+            {!loading && items.length > 0 && (
+              <>
+                <p className="sub count">
+                  {selectedCol && !inTrash ? `Colección "${selectedCol.name}" · ` : ""}
+                  {inTrash ? "Papelera · " : ""}
+                  {items.length}/{total} recursos
+                </p>
+                {view === "grid" ? (
+                  <div className="media-grid">
+                    {items.map((item) => (
+                      <GridCard
+                        key={item.id}
+                        item={item}
+                        trash={inTrash}
+                        selected={selectedIds.has(item.id)}
+                        onToggleSelect={() => toggleSelect(item.id)}
+                        onOpen={() => setDetail(item)}
+                        onEdit={() => openEdit(item)}
+                        onDelete={() => handleDelete(item)}
+                        onRestore={() => handleRestore(item)}
+                        onPurge={() => handlePurge(item)}
+                        onAddToCollection={() => setAddItemFor(item)}
+                        hasCollections={collections.length > 0}
+                        activeColId={selectedCol?.id}
+                        onRemoveFromCol={() => handleRemoveFromCollection(item)}
+                        onTagClick={setActiveTag}
+                        onRate={(s) => rateItem(item.id, s)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <table className="list-table">
+                    <thead>
+                      <tr>
+                        <th />
+                        <th>Título</th>
+                        <th>Tipo</th>
+                        <th>Tags</th>
+                        <th>★</th>
+                        <th>Tamaño</th>
+                        <th>Duración</th>
+                        <th>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((item) => (
+                        <ListRow
+                          key={item.id}
+                          item={item}
+                          inTrash={inTrash}
+                          selected={selectedIds.has(item.id)}
+                          onToggleSelect={() => toggleSelect(item.id)}
+                          onOpen={() => setDetail(item)}
+                          onRestore={() => handleRestore(item)}
+                          onPurge={() => handlePurge(item)}
+                          onDelete={() => handleDelete(item)}
+                          onEdit={() => openEdit(item)}
+                          onAddToCollection={() => setAddItemFor(item)}
+                          onRate={(s) => rateItem(item.id, s)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                <div ref={sentinel} />
+                {hasMore && (
+                  <div className="row center">
+                    <button className="ghost" onClick={loadMore}>
+                      Cargar más ({total - items.length} restantes)
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </main>
+
+      {/* ==================== OVERLAYS ==================== */}
+      {detail && (
+        <DetailPanel
+          item={items.find((i) => i.id === detail.id) ?? detail}
+          onClose={() => setDetail(null)}
+          onChanged={(upd) => setItems((prev) => prev.map((i) => (i.id === upd.id ? upd : i)))}
+          onAddToCollectionPicker={(it) => setAddItemFor(it)}
+          onTrimCreated={(frag: MediaItem) => {
+            setBulkMsg(`✂ fragmento creado: ${frag.title}`);
+            Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
+          }}
+        />
+      )}
+
       {profileOpen && (
         <div className="overlay" onClick={() => setProfileOpen(false)}>
           <main className="card profile-card" onClick={(e) => e.stopPropagation()}>
@@ -764,19 +1104,11 @@ export default function HomePage({
             <div className="two-col">
               <div>
                 <p className="label">Cámara</p>
-                <input
-                  placeholder="Sony a7, A6000..."
-                  value={editDraft.camera}
-                  onChange={(e) => setEditDraft({ ...editDraft, camera: e.target.value })}
-                />
+                <input placeholder="Sony a7, A6000..." value={editDraft.camera} onChange={(e) => setEditDraft({ ...editDraft, camera: e.target.value })} />
               </div>
               <div>
                 <p className="label">Proyecto</p>
-                <input
-                  placeholder="Intro, Podcast 12..."
-                  value={editDraft.proyecto}
-                  onChange={(e) => setEditDraft({ ...editDraft, proyecto: e.target.value })}
-                />
+                <input placeholder="Intro, Podcast 12..." value={editDraft.proyecto} onChange={(e) => setEditDraft({ ...editDraft, proyecto: e.target.value })} />
               </div>
             </div>
             <p className="label">Visibilidad</p>
@@ -789,9 +1121,7 @@ export default function HomePage({
               <option value="team">Del equipo</option>
             </select>
             <div className="row">
-              <button type="button" className="ghost" onClick={() => setEditing(null)}>
-                Cancelar
-              </button>
+              <button type="button" className="ghost" onClick={() => setEditing(null)}>Cancelar</button>
               <button className="primary">Guardar</button>
             </div>
           </form>
@@ -804,7 +1134,7 @@ export default function HomePage({
             <h2>Agregar a colección</h2>
             <p className="sub">{addItemFor.title}</p>
             {collections.length === 0 ? (
-              <p className="sub">Primero crea una colección con "+ Nueva".</p>
+              <p className="sub">Primero crea una colección.</p>
             ) : (
               <div className="col-options">
                 {collections.map((c) => (
@@ -823,60 +1153,6 @@ export default function HomePage({
         </div>
       )}
 
-      {playing && (
-        <div className="overlay" onClick={() => setPlaying(null)}>
-          <div className="modal player" onClick={(e) => e.stopPropagation()}>
-            {playing.kind === "video" && (
-              <>
-                <video controls autoPlay src={mediaUrl(playing.id, "file")} ref={videoRef} />
-                <button className="ghost inplayer" onClick={useThisFrame} title="Usar este frame como poster">
-                  🖼 Usar este frame
-                </button>
-              </>
-            )}
-            {playing.kind === "audio" && <audio controls autoPlay src={mediaUrl(playing.id, "file")} />}
-            {playing.kind === "image" && <img src={mediaUrl(playing.id, "file")} alt={playing.title} />}
-            <div className="player-caption">
-              <div className="player-title-row">
-                <p className="sub">{playing.title}</p>
-                <Stars rating={playing.rating} big onRate={(s) => rateItem(playing, s)} />
-              </div>
-              {playing.description && <p className="sub muted">{playing.description}</p>}
-              {playing.meta?.camera && <p className="sub muted">📹 {playing.meta.camera}</p>}
-              {(playing.kind === "video" || playing.kind === "audio") && (
-                <>
-                  <p className="sub muted">← → navegar · I marca In · O marca Out · Esc cierra</p>
-                  <div className="trim-bar">
-                    <button
-                      className="chip"
-                      onClick={() => setTrimIn(videoRef.current?.currentTime ?? 0)}
-                      title="Marcar In (tecla I)"
-                    >
-                      [ In {trimIn === null ? "" : trimIn.toFixed(1) + "s"} ]
-                    </button>
-                    <button
-                      className="chip"
-                      onClick={() => setTrimOut(videoRef.current?.currentTime ?? 0)}
-                      title="Marcar Out (tecla O)"
-                    >
-                      [ Out {trimOut === null ? "" : trimOut.toFixed(1) + "s"} ]
-                    </button>
-                    <button
-                      className="chip active"
-                      disabled={trimBusy || trimIn === null || trimOut === null}
-                      onClick={cutSegment}
-                      title="Crea un re-scurso nuevo con el fragmento"
-                    >
-                      {trimBusy ? "Cortando…" : "✂ Cortar In→Out"}
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {dupesOpen && (
         <div className="overlay" onClick={() => setDupesOpen(false)}>
           <div className="card dupe-card" onClick={(e) => e.stopPropagation()}>
@@ -890,7 +1166,7 @@ export default function HomePage({
                 <ul>
                   {g.map((it) => (
                     <li key={it.id}>
-                      {it.title} <span className="muted">· subido {it.created_at.slice(0, 10)}</span>
+                      {it.title} <span className="muted">· {it.created_at.slice(0, 10)}</span>
                     </li>
                   ))}
                 </ul>
@@ -904,317 +1180,11 @@ export default function HomePage({
               </div>
             ))}
             <div className="row">
-              <button className="ghost" onClick={() => setDupesOpen(false)}>
-                Cerrar
-              </button>
+              <button className="ghost" onClick={() => setDupesOpen(false)}>Cerrar</button>
             </div>
           </div>
         </div>
       )}
-
-      {/* -------- barra de pestañas + búsqueda -------- */}
-      <div className="lib-toolbar">
-        <nav className="tabs" aria-label="Tipos de recurso">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              className={`tab${tab === t.key ? " active" : ""}`}
-              onClick={() => {
-                if (t.key !== "trash") setSelectedCol(null); // papelera NO respeta colección
-                setTab(t.key);
-              }}
-            >
-              {t.icon} {t.label}
-            </button>
-          ))}
-        </nav>
-        <input
-          className="search"
-          ref={searchInput}
-          placeholder="Buscar por nombre, tag o descripción...  ( / para enfocar )"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          aria-label="Buscar"
-        />
-        <select
-          aria-label="Alcance"
-          value={scope}
-          onChange={(e) => setScope(e.target.value as "mine" | "team")}
-          title="Qué libros ver: solo tuyas (+ equipo público)"
-        >
-          <option value="mine">Mías</option>
-          <option value="team">+ Equipo</option>
-        </select>
-        <select
-          aria-label="Orden"
-          value={`${order}:${direction}`}
-          onChange={(e) => {
-            const [o, d] = e.target.value.split(":");
-            setOrder(o as typeof order);
-            setDirection(d as "asc" | "desc");
-          }}
-        >
-          <option value="created:desc">＋ Nuevos primero</option>
-          <option value="created:asc">－ Viejos primero</option>
-          <option value="title:asc">A → Z</option>
-          <option value="title:desc">Z → A</option>
-          <option value="size:desc">Pesados primero</option>
-          <option value="size:asc">Ligeros primero</option>
-          <option value="duration:desc">Más largos</option>
-          <option value="duration:asc">Más cortos</option>
-          <option value="rating:desc">★ Mejor valorados</option>
-        </select>
-        {!inTrash && (
-          <button
-            className={`chip${minRating ? " active" : ""}`}
-            onClick={() => setMinRating((v) => !v)}
-            title="Solo recursos valorados con 3+ estrellas"
-            aria-label="Filtrar favoritos"
-          >
-            ★ Favoritos
-          </button>
-        )}
-        <button className="primary" onClick={() => setUploadOpen(true)}>
-          + Subir
-        </button>
-      </div>
-
-      {/* -------- barra de colecciones + export -------- */}
-      {!inTrash && (
-        <div className="collections-bar">
-          <span className="label">Colecciones</span>
-          <select
-            aria-label="Seleccionar colección"
-            value={selectedCol?.id ?? ""}
-            onChange={(e) => {
-              const id = Number(e.target.value);
-              setSelectedCol(collections.find((c) => c.id === id) ?? null);
-            }}
-          >
-            <option value="">— ver todo —</option>
-            {collections.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.is_project ? "🎬 " : ""}
-                {c.name} ({c.item_count})
-              </option>
-            ))}
-          </select>
-          <button className="ghost" onClick={handleCreateCollection} aria-label="Nueva colección">
-            + Nueva / editar
-          </button>
-          {selectedCol && (
-            <>
-              <a
-                className="chip"
-                href={exportUrl(selectedCol.id, "txt")}
-                download
-                title="Descargar lista .txt"
-                aria-label="Exportar lista txt"
-              >
-                ⬇ .txt
-              </a>
-              <a
-                className="chip"
-                href={exportUrl(selectedCol.id, "csv")}
-                download
-                title="Descargar lista .csv"
-                aria-label="Exportar lista csv"
-              >
-                ⬇ .csv
-              </a>
-            </>
-          )}
-          {bulkMsg && <span className="ok">{bulkMsg}</span>}
-          {colError && <span className="error">{colError}</span>}
-        </div>
-      )}
-
-      {/* -------- barra de acciones en lote -------- */}
-      {selectedIds.size > 0 && (
-        <div className="bulk-bar">
-          <strong>{selectedIds.size} seleccionado(s)</strong>
-          {!inTrash && (
-            <>
-              <input
-                placeholder="tags a añadir/como quitar (coma)"
-                value={bulkTagsText}
-                onChange={(e) => setBulkTagsText(e.target.value)}
-                aria-label="Tags para el lote"
-              />
-              <button className="chip" disabled={bulkBusy} onClick={() => runBulk("add_tag")}>
-                ＋ tags
-              </button>
-              <button className="chip" disabled={bulkBusy} onClick={() => runBulk("remove_tag")}>
-                － tags
-              </button>
-              <select
-                aria-label="Colección destino del lote"
-                value={bulkColId}
-                onChange={(e) => setBulkColId(Number(e.target.value))}
-              >
-                <option value="">— añadir a colección…</option>
-                {collections.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                className="chip"
-                disabled={bulkBusy || !bulkColId}
-                onClick={() => runBulk("add_to_collection")}
-              >
-                → añadir
-              </button>
-              <button className="chip" disabled={bulkBusy} onClick={() => runBulk("set_visibility")}>
-                👥 team
-              </button>
-              <button className="chip danger" disabled={bulkBusy} onClick={() => runBulk("delete")}>
-                🗑 papelera
-              </button>
-            </>
-          )}
-          {inTrash && (
-            <>
-              <button className="chip" disabled={bulkBusy} onClick={() => runBulk("restore")}>
-                ↺ restaurar
-              </button>
-              <button className="chip danger" disabled={bulkBusy} onClick={() => runBulk("purge")}>
-                🗑 purgar
-              </button>
-            </>
-          )}
-          <button className="ghost" onClick={() => setSelectedIds(new Set())}>
-            cancelar
-          </button>
-        </div>
-      )}
-
-      {/* -------- chips de tags -------- */}
-      {tagChips.length > 0 && !inTrash && (
-        <div className="tag-chips">
-          {activeTag && (
-            <button
-              className="chip active"
-              onClick={() => setActiveTag(null)}
-              aria-label="Quitar filtro de tag"
-            >
-              ✕ {activeTag}
-            </button>
-          )}
-          {tagChips
-            .filter((c) => c.tag !== activeTag)
-            .map((c) => (
-              <button key={c.tag} className="chip" onClick={() => setActiveTag(c.tag)}>
-                {c.tag} <span className="chip-count">{c.count}</span>
-              </button>
-            ))}
-        </div>
-      )}
-
-      {/* -------- listado -------- */}
-      <main className="lib">
-        {loading && <p className="loading">Cargando…</p>}
-        {listError && <p className="error">{listError}</p>}
-        {!loading && !listError && items.length === 0 && (
-          <div className="empty">
-            <p>
-              {inTrash
-                ? "La papelera está vacía."
-                : debouncedQ || activeTag || selectedCol
-                  ? "Sin resultados. Prueba otra búsqueda o quita el filtro."
-                  : "Nada por aquí todavía. Sube o arrastra tus primeros recursos."}
-            </p>
-          </div>
-        )}
-        {!loading && items.length > 0 && (
-          <>
-            <p className="sub count">
-              {selectedCol ? `Colección "${selectedCol.name}" · ` : ""}
-              {inTrash ? "Papelera · " : ""}
-              {items.length}/{total} recursos
-            </p>
-            {view === "grid" && !inTrash && (
-              <div className="media-grid">
-                {items.map((item) => (
-                  <GridCard
-                    key={item.id}
-                    item={item}
-                    selected={selectedIds.has(item.id)}
-                    onToggleSelect={() => toggleSelect(item.id)}
-                    onPlay={() => setPlaying(item)}
-                    onEdit={() => openEdit(item)}
-                    onDelete={() => handleDelete(item)}
-                    onAddToCollection={() => setAddItemFor(item)}
-                    hasCollections={collections.length > 0}
-                    activeColId={selectedCol?.id}
-                    onRemoveFromCol={() => handleRemoveFromCollection(item)}
-                    onTagClick={setActiveTag}
-                    onRate={(s) => rateItem(item, s)}
-                  />
-                ))}
-              </div>
-            )}
-            {view === "grid" && inTrash && (
-              <div className="media-grid">
-                {items.map((item) => (
-                  <GridCard
-                    key={item.id}
-                    item={item}
-                    trash
-                    selected={selectedIds.has(item.id)}
-                    onToggleSelect={() => toggleSelect(item.id)}
-                    onRestore={() => handleRestore(item)}
-                    onPurge={() => handlePurge(item)}
-                  />
-                ))}
-              </div>
-            )}
-            {view === "list" && (
-              <table className="list-table">
-                <thead>
-                  <tr>
-                    <th />
-                    <th>Título</th>
-                    <th>Tipo</th>
-                    <th>Tags</th>
-                    <th>★</th>
-                    <th>Tamaño</th>
-                    <th>Duración</th>
-                    <th>Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item) => (
-                    <ListRow
-                      key={item.id}
-                      item={item}
-                      selected={selectedIds.has(item.id)}
-                      onToggleSelect={() => toggleSelect(item.id)}
-                      onPlay={() => setPlaying(item)}
-                      inTrash={inTrash}
-                      onRestore={() => handleRestore(item)}
-                      onPurge={() => handlePurge(item)}
-                      onDelete={() => handleDelete(item)}
-                      onEdit={() => openEdit(item)}
-                      onAddToCollection={() => setAddItemFor(item)}
-                      onRate={(s) => rateItem(item, s)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            )}
-            <div ref={sentinel} />
-            {hasMore && (
-              <div className="row center">
-                <button className="ghost" onClick={loadMore}>
-                  Cargar más ({total - items.length} restantes)
-                </button>
-              </div>
-            )}
-          </>
-        )}
-      </main>
     </div>
   );
 }
@@ -1265,7 +1235,7 @@ function GridCard({
   trash,
   selected,
   onToggleSelect,
-  onPlay,
+  onOpen,
   onEdit,
   onDelete,
   onRestore,
@@ -1281,7 +1251,7 @@ function GridCard({
   trash?: boolean;
   selected: boolean;
   onToggleSelect?: () => void;
-  onPlay?: () => void;
+  onOpen?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
   onRestore?: () => void;
@@ -1295,7 +1265,7 @@ function GridCard({
 }) {
   return (
     <article className={`media-card${selected ? " selected" : ""}`}>
-      <button className="media-visual" onClick={onPlay} aria-label={`Ver ${item.title}`}>
+      <button className="media-visual" onClick={onOpen} aria-label={`Abrir ${item.title}`}>
         <Thumb item={item} />
       </button>
       <label className="pick-row">
@@ -1306,7 +1276,7 @@ function GridCard({
       <div className="media-info">
         {!trash && onTagClick && (
           <div className="media-tags">
-            {item.tags.map((t) => (
+            {item.tags.slice(0, 6).map((t) => (
               <button
                 key={t}
                 className="mini-chip"
@@ -1322,35 +1292,18 @@ function GridCard({
         <span className="media-meta">
           {fmtSize(item.size)}
           {item.duration_s !== null && item.duration_s !== undefined ? ` · ${fmtDuration(item.duration_s)}` : ""}
-          {trash ? ` · borrado ${item.created_at.slice(0, 10)} (subida)` : ""}
         </span>
         {item.description && <span className="media-meta desc">{item.description}</span>}
       </div>
       <div className="media-actions">
         {trash && onRestore && (
-          <button className="ghost" onClick={onRestore} aria-label={`Restaurar ${item.title}`} title="Restaurar">
-            ↺
-          </button>
+          <button className="ghost" onClick={onRestore} aria-label={`Restaurar ${item.title}`} title="Restaurar">↺</button>
         )}
         {onRemoveFromCol && activeColId && (
-          <button
-            className="ghost"
-            onClick={onRemoveFromCol}
-            aria-label={`Quitar ${item.title} de la colección`}
-            title="Quitar de la colección"
-          >
-            －
-          </button>
+          <button className="ghost" onClick={onRemoveFromCol} aria-label={`Quitar ${item.title} de la colección`} title="Quitar de la colección">－</button>
         )}
         {!trash && hasCollections && onAddToCollection && (
-          <button
-            className="ghost"
-            onClick={onAddToCollection}
-            aria-label={`Agregar ${item.title} a una colección`}
-            title="Agregar a una colección"
-          >
-            ＋
-          </button>
+          <button className="ghost" onClick={onAddToCollection} aria-label={`Agregar ${item.title} a una colección`} title="Agregar a una colección">＋</button>
         )}
         <a
           className="ghost action-link"
@@ -1361,25 +1314,14 @@ function GridCard({
         >
           ⬇
         </a>
-        {!trash && onPlay && (
-          <button className="ghost" onClick={onPlay} aria-label={`Reproducir ${item.title}`}>
-            {item.kind === "image" ? "👁" : "▶"}
-          </button>
-        )}
         {!trash && onEdit && (
-          <button className="ghost" onClick={onEdit} aria-label={`Editar ${item.title}`}>
-            ✏️
-          </button>
+          <button className="ghost" onClick={onEdit} aria-label={`Editar ${item.title}`} title="Editar">✏️</button>
         )}
         {!trash && onDelete && (
-          <button className="ghost danger" onClick={onDelete} aria-label={`Eliminar ${item.title}`} title="A la papelera">
-            🗑
-          </button>
+          <button className="ghost danger" onClick={onDelete} aria-label={`Eliminar ${item.title}`} title="A la papelera">🗑</button>
         )}
         {trash && onPurge && (
-          <button className="ghost danger" onClick={onPurge} aria-label={`Purgar ${item.title}`} title="Borrar definitivo">
-            🔥
-          </button>
+          <button className="ghost danger" onClick={onPurge} aria-label={`Purgar ${item.title}`} title="Borrar definitivo">🔥</button>
         )}
       </div>
     </article>
@@ -1391,7 +1333,7 @@ function ListRow({
   inTrash,
   selected,
   onToggleSelect,
-  onPlay,
+  onOpen,
   onDelete,
   onEdit,
   onRestore,
@@ -1403,7 +1345,7 @@ function ListRow({
   inTrash: boolean;
   selected: boolean;
   onToggleSelect: () => void;
-  onPlay: () => void;
+  onOpen: () => void;
   onDelete?: () => void;
   onEdit?: () => void;
   onRestore?: () => void;
@@ -1417,7 +1359,7 @@ function ListRow({
         <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label={`Seleccionar ${item.title}`} />
       </td>
       <td>
-        <button className="ghost inline" onClick={onPlay} aria-label={`Ver ${item.title}`}>
+        <button className="ghost inline" onClick={onOpen} aria-label={`Abrir ${item.title}`}>
           <span className="list-thumb">
             <Thumb item={item} className="mini" />
           </span>
@@ -1426,32 +1368,20 @@ function ListRow({
       </td>
       <td>{KIND_ICON[item.kind]}</td>
       <td className="muted">{item.tags.join(", ")}</td>
-      <td>
-        {onRate ? (
-          <Stars rating={item.rating} onRate={(s) => onRate(s)} />
-        ) : (
-          "★".repeat(item.rating)
-        )}
-      </td>
+      <td>{onRate ? <Stars rating={item.rating} onRate={(s) => onRate(s)} /> : "★".repeat(item.rating)}</td>
       <td>{fmtSize(item.size)}</td>
       <td>{fmtDuration(item.duration_s)}</td>
       <td className="row-actions">
         {inTrash && onRestore && (
-          <button className="ghost" onClick={onRestore} title="Restaurar">
-            ↺
-          </button>
+          <button className="ghost" onClick={onRestore} title="Restaurar">↺</button>
         )}
         {inTrash && onPurge && (
-          <button className="ghost danger" onClick={onPurge} title="Purgar">
-            🔥
-          </button>
+          <button className="ghost danger" onClick={onPurge} title="Purgar">🔥</button>
         )}
         {!inTrash && (
           <>
             {onAddToCollection && (
-              <button className="ghost" onClick={onAddToCollection} title="Agregar a colección">
-                ＋
-              </button>
+              <button className="ghost" onClick={onAddToCollection} title="Agregar a colección">＋</button>
             )}
             <a
               className="ghost action-link"
@@ -1463,14 +1393,10 @@ function ListRow({
               ⬇
             </a>
             {onEdit && (
-              <button className="ghost" onClick={onEdit} title="Editar">
-                ✏️
-              </button>
+              <button className="ghost" onClick={onEdit} title="Editar">✏️</button>
             )}
             {onDelete && (
-              <button className="ghost danger" onClick={onDelete} title="A la papelera">
-                🗑
-              </button>
+              <button className="ghost danger" onClick={onDelete} title="A la papelera">🗑</button>
             )}
           </>
         )}
@@ -1478,5 +1404,3 @@ function ListRow({
     </tr>
   );
 }
-
-export { };

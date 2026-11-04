@@ -209,6 +209,16 @@ export function deleteMedia(id: number): Promise<void> {
   return request(`/media/${id}`, { method: "DELETE" });
 }
 
+/** Extrae la pista de audio de un VIDEO → mp3 nuevo. Para el flujo SFX. */
+export function extractAudio(id: number): Promise<MediaItem> {
+  return request(`/media/${id}/extract-audio`, { method: "POST" });
+}
+
+/** Pide sugerencias de tags (IA/heurística). NO aplica nada por sí sola. */
+export function getAutotagSuggestions(id: number): Promise<{ suggestions: string[]; source: string }> {
+  return request(`/media/${id}/autotag`, { method: "POST" });
+}
+
 export function bulkMedia(
   ids: number[],
   action: "add_tag" | "remove_tag" | "set_visibility" | "delete" | "restore" | "purge" | "add_to_collection",

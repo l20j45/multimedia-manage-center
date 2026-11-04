@@ -78,7 +78,7 @@ describe("HomePage (biblioteca)", () => {
     const user = userEvent.setup({ delay: null });
     render(<HomePage user={USER} onChange={() => {}} onLogout={() => {}} />);
     const box = (await screen
-      .findAllByPlaceholderText(/Buscar por nombre/)
+      .findAllByPlaceholderText(/Búsqueda rápida/)
       .then((els) => els[0])) as HTMLInputElement;
     await user.type(box, "logo");
     // el debounce es de 300ms
