@@ -24,6 +24,16 @@ def run_migrations() -> None:
 
 run_migrations()
 
+# Papelera: purga lo que lleva más de TRASH_RETENTION_DAYS borrado (silencioso).
+from app.services.media import purge_expired_trash  # noqa: E402
+
+try:
+    purged = purge_expired_trash()
+    if purged:
+        print(f"papelera: purgados {purged} recurso(s) expirados")
+except Exception:  # noqa: BLE001 - nunca bloquea el arranque
+    pass
+
 app = FastAPI(title=settings.PROJECT_NAME)
 
 # Rate limiting ANTES de CORS: así el middleware de CORS (añadido después)

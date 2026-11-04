@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Sin llave se usa la heurística local (duración/aspecto/nombre).
     GEMINI_API_KEY: str = ""
 
+    # Papelera: recursos borrados se purgan automáticamente tras N días.
+    TRASH_RETENTION_DAYS: int = 30
+
     # Rate limiting por IP en /auth/* (login, registro, recuperación)
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_WINDOW: int = 60  # segundos por ventana

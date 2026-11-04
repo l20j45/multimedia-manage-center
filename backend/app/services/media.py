@@ -14,6 +14,7 @@ Thumbnails:
 import shutil
 import subprocess
 import uuid
+from datetime import UTC
 from pathlib import Path
 
 from app.config import settings
@@ -291,3 +292,40 @@ def delete_files(rel_paths: list[str | None]) -> None:
             continue
         p = media_root() / rel
         p.unlink(missing_ok=True)
+
+
+def purge_expired_trash(max_age_days: int | None = None) -> int:
+    """Purga DEFINITIVA de lo que lleva más de N días en la papelera.
+
+    Se corre al arrancar el backend (main.py, silencioso). Devuelve la
+    cantidad purgada. max_age_days override para tests.
+    """
+    from datetime import datetime, timedelta
+
+    from app.database import SessionLocal
+    from app.models import CollectionItem, MediaItem
+
+    days = max_age_days if max_age_days is not None else settings.TRASH_RETENTION_DAYS
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    db = SessionLocal()
+    try:
+        expired = (
+            db.query(MediaItem)
+            .filter(MediaItem.deleted_at.is_not(None), MediaItem.deleted_at < cutoff)
+            .all()
+        )
+        if not expired:
+            return 0
+        files: list[str | None] = []
+        for it in expired:
+            files.extend([it.path, it.thumb_path])
+        ids = [it.id for it in expired]
+        db.query(CollectionItem).filter(CollectionItem.media_id.in_(ids)).delete(
+            synchronize_session=False
+        )
+        db.query(MediaItem).filter(MediaItem.id.in_(ids)).delete(synchronize_session=False)
+        db.commit()
+        delete_files(files)
+        return len(ids)
+    finally:
+        db.close()
