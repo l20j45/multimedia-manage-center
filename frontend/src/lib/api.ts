@@ -80,3 +80,81 @@ export function resetPassword(email: string, code: string, newPassword: string):
     body: JSON.stringify({ email, code, new_password: newPassword }),
   });
 }
+
+// ---------------------------------------------------------------- media
+export type MediaKind = "audio" | "image" | "video";
+
+export interface MediaItem {
+  id: number;
+  kind: MediaKind;
+  title: string;
+  tags: string[];
+  filename: string;
+  path: string;
+  mime: string;
+  size: number;
+  duration_s: number | null;
+  has_thumb: boolean;
+  created_at: string;
+}
+
+export interface MediaList {
+  items: MediaItem[];
+  total: number;
+}
+
+export function listMedia(
+  params: { q?: string; kind?: MediaKind; tag?: string; limit?: number; offset?: number } = {},
+): Promise<MediaList> {
+  const search = new URLSearchParams();
+  if (params.q) search.set("q", params.q);
+  if (params.kind) search.set("kind", params.kind);
+  if (params.tag) search.set("tag", params.tag);
+  if (params.limit) search.set("limit", String(params.limit));
+  if (params.offset) search.set("offset", String(params.offset));
+  const qs = search.toString();
+  return request(`/media${qs ? `?${qs}` : ""}`);
+}
+
+/** Sube con FormData (el fetch no debe poner Content-Type: lo fija el navegador). */
+export function uploadMedia(
+  file: File,
+  title: string,
+  tagsCsv: string,
+): Promise<MediaItem> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("title", title);
+  form.append("tags", tagsCsv);
+  const token = getToken();
+  return fetch(`${API_BASE}/media`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  }).then(async (res) => {
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data as { detail?: string }).detail ?? `Error ${res.status}`);
+    return data as MediaItem;
+  });
+}
+
+export function updateMedia(
+  id: number,
+  data: { title?: string; tags?: string[] },
+): Promise<MediaItem> {
+  return request(`/media/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+}
+
+export function deleteMedia(id: number): Promise<void> {
+  return request(`/media/${id}`, { method: "DELETE" });
+}
+
+export function listTags(): Promise<{ tag: string; count: number }[]> {
+  return request("/media/tags");
+}
+
+/** URL del fichero/thumbnail con el token en query (los <img>/<video> no mandan header). */
+export function mediaUrl(id: number, what: "file" | "thumb" = "file"): string {
+  const token = getToken() ?? "";
+  return `${API_BASE}/media/${id}/${what}?access_token=${encodeURIComponent(token)}`;
+}
