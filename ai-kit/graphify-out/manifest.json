@@ -271,9 +271,9 @@
   },
   "README.md": {
     "mtime": 1793834415.4522448,
-    "seen": 1793834431.5951202,
+    "seen": 1793834516.5583537,
     "ast_hash": "875e125c25cac45956b57374e9df3348",
-    "semantic_hash": ""
+    "semantic_hash": "875e125c25cac45956b57374e9df3348"
   },
   "backend/requirements.txt": {
     "mtime": 1793824590.9482398,
