@@ -48,6 +48,12 @@ class MediaItem(Base):
     kind: Mapped[str] = mapped_column(String(10), index=True, nullable=False)  # audio|image|video
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     tags: Mapped[str] = mapped_column(String(500), default="", server_default="")  # CSV minúsculas
+    description: Mapped[str] = mapped_column(
+        sa.Text, default="", server_default=""
+    )  # notas (en búsqueda)
+    meta: Mapped[dict | None] = mapped_column(
+        sa.JSON, nullable=True
+    )  # {camera, proyecto, ...} campos libres
     filename: Mapped[str] = mapped_column(String(255), nullable=False)  # nombre original al subir
     path: Mapped[str] = mapped_column(
         String(255), unique=True, nullable=False
@@ -57,12 +63,19 @@ class MediaItem(Base):
     )  # relativo a MEDIA_DIR
     mime: Mapped[str] = mapped_column(String(100), nullable=False)
     size: Mapped[int] = mapped_column(nullable=False)  # bytes
+    sha256: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)  # duplicados
     duration_s: Mapped[float | None] = mapped_column(nullable=True)  # audio/video (ffprobe)
+    visibility: Mapped[str] = mapped_column(
+        String(10), index=True, default="private", server_default="private"
+    )  # private|team
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )  # papelera
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Collection(Base):
-    """Colección (álbum/playlist) de la biblioteca de un usuario."""
+    """Colección (álbum/playlist/edición) de la biblioteca de un usuario."""
 
     __tablename__ = "collections"
     __table_args__ = (sa.UniqueConstraint("owner_id", "name"),)
@@ -70,6 +83,7 @@ class Collection(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    is_project: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa.text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

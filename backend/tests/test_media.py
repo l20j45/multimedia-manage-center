@@ -150,9 +150,24 @@ def test_fichero_y_thumb_con_token_query_borrado() -> None:
     res = client.get("/media", params={"q": "icono"}, headers=auth(other))
     assert res.json()["total"] == 0
 
-    # borrar → fila + ficheros fuera
+    # borrar → PAPELERA (soft): deja de listar y los ficheros quedan hasta el purge
     rel = item["path"]
     res = client.delete(f"/media/{item['id']}", headers=auth(token))
+    assert res.status_code == 204
+    assert Path(settings.MEDIA_DIR, rel).exists()
+    res = client.get("/media", headers=auth(token))
+    assert res.json()["total"] == 0
+    res = client.get("/media", params={"trash": True}, headers=auth(token))
+    assert res.json()["total"] == 1
+
+    # restore desde la papelera
+    res = client.post(f"/media/{item['id']}/restore", headers=auth(token))
+    assert res.status_code == 200, res.text
+    res = client.get("/media", headers=auth(token))
+    assert res.json()["total"] == 1
+
+    # purge => borrado definitivo (fila + ficheros)
+    res = client.delete(f"/media/{item['id']}/purge", headers=auth(token))
     assert res.status_code == 204
     assert not Path(settings.MEDIA_DIR, rel).exists()
     res = client.get("/media", headers=auth(token))

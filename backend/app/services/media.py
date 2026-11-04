@@ -46,12 +46,15 @@ def media_root() -> Path:
 
 def save_stream(
     fileobj, original_name: str, owner_id: int, mime: str | None = None
-) -> tuple[str, int, str]:
+) -> tuple[str, int, str, str]:
     """Guarda el stream del UploadFile en disco.
 
-    Devuelve (ruta_relativa, size_bytes, mime). Lanza 413 (HTTPException mapeada
-    en el router) si excede MAX_UPLOAD_MB.
+    Devuelve (ruta_relativa, size_bytes, mime, sha256). Lanza 413 (la router
+    lo mapea) si excede MAX_UPLOAD_MB. El sha256 es del CONTENIDO: sirve para
+    detectar duplicados aunque el usuario re-suba con otro nombre.
     """
+    import hashlib
+
     from fastapi import HTTPException, status
 
     ext = Path(original_name).suffix.lower()
@@ -63,6 +66,7 @@ def save_stream(
 
     limit = settings.MAX_UPLOAD_MB * 1024 * 1024
     size = 0
+    hasher = hashlib.sha256()
     with dst.open("wb") as out:
         while chunk := fileobj.read(CHUNK):
             size += len(chunk)
@@ -70,15 +74,16 @@ def save_stream(
                 out.close()
                 dst.unlink(missing_ok=True)
                 raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                     detail=f"Archivo excede el límite de {settings.MAX_UPLOAD_MB} MB",
                 )
+            hasher.update(chunk)
             out.write(chunk)
     if size == 0:
         dst.unlink(missing_ok=True)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Archivo vacío")
     mime = mime or "application/octet-stream"
-    return str(rel_path), size, mime
+    return str(rel_path), size, mime, hasher.hexdigest()
 
 
 def ffmpeg_bin() -> str | None:
@@ -124,9 +129,63 @@ def make_thumbnail(rel_path: str, kind: str) -> str | None:
             subprocess.run(cmd, timeout=60, check=True, capture_output=True)
             if not dst_abs.exists():
                 return None
+        elif kind == "audio" and ffmpeg_bin():
+            cmd = [
+                ffmpeg_bin(),
+                "-loglevel",
+                "error",
+                "-i",
+                str(src),
+                "-filter_complex",
+                "showwavespic=s=480x160:colors=#6366f1",
+                "-frames:v",
+                "1",
+                "-y",
+                str(dst_abs),
+            ]
+            subprocess.run(cmd, timeout=60, check=True, capture_output=True)
+            if not dst_abs.exists():
+                return None
         else:
             return None
     except Exception:  # noqa: BLE001 - el thumb es best-effort
+        dst_abs.unlink(missing_ok=True)
+        return None
+    return str(Path(rel_path).parent / dst_name.name)
+
+
+def rethumbnail_at(rel_path: str, at_seconds: float) -> str | None:
+    """Regenera el thumbnail de un VIDEO tomándolo en `at_seconds`.
+
+    Sobreescribe el thumb. Best-effort: None si no hay ffmpeg o falla.
+    """
+    root = media_root()
+    src = root / rel_path
+    dst_name = Path(rel_path).with_name(f"{Path(rel_path).stem}_t.jpg")
+    dst_abs = src.parent / dst_name.name
+    ff = ffmpeg_bin()
+    if not ff:
+        return None
+    try:
+        cmd = [
+            ff,
+            "-loglevel",
+            "error",
+            "-ss",
+            str(max(0.0, at_seconds)),
+            "-i",
+            str(src),
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale='min(512,iw)':-2",
+            "-y",
+            str(dst_abs),
+        ]
+        subprocess.run(cmd, timeout=60, check=True, capture_output=True)
+        if not dst_abs.exists():
+            return None
+    except Exception:  # noqa: BLE001
         dst_abs.unlink(missing_ok=True)
         return None
     return str(Path(rel_path).parent / dst_name.name)

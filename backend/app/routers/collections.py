@@ -7,7 +7,7 @@ endpoints limpian las filas hijas manualmente.
 
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app import schemas
@@ -48,9 +48,7 @@ def list_collections(
     )
     for (col_id,) in rows:
         counts[col_id] += 1
-    return [
-        schemas.CollectionOut(id=c.id, name=c.name, item_count=counts[c.id]) for c in collections
-    ]
+    return [schemas.CollectionOut.from_col(c, counts[c.id]) for c in collections]
 
 
 @router.post("", response_model=schemas.CollectionOut, status_code=status.HTTP_201_CREATED)
@@ -70,11 +68,95 @@ def create_collection(
             status.HTTP_409_CONFLICT,
             detail=f"Ya existe una colección llamada '{data.name.strip()}'",
         )
-    col = Collection(owner_id=user.id, name=data.name.strip())
+    col = Collection(owner_id=user.id, name=data.name.strip(), is_project=data.is_project)
     db.add(col)
     db.commit()
     db.refresh(col)
-    return schemas.CollectionOut(id=col.id, name=col.name, item_count=0)
+    return schemas.CollectionOut.from_col(col, 0)
+
+
+@router.patch("/{collection_id}", response_model=schemas.CollectionOut)
+def update_collection(
+    collection_id: int,
+    data: schemas.CollectionUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> schemas.CollectionOut:
+    """Renombra o marca/des-marca como proyecto (edición)."""
+    col = _owned_collection(db, user, collection_id)
+    if data.name is not None:
+        name = data.name.strip()
+        dup = (
+            db.query(Collection)
+            .filter(
+                Collection.owner_id == user.id,
+                Collection.name == name,
+                Collection.id != col.id,
+            )
+            .first()
+        )
+        if dup:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, detail=f"Ya existe una colección llamada '{name}'"
+            )
+        col.name = name
+    if data.is_project is not None:
+        col.is_project = data.is_project
+    db.commit()
+    db.refresh(col)
+    total = db.query(CollectionItem).filter(CollectionItem.collection_id == col.id).count()
+    return schemas.CollectionOut.from_col(col, total)
+
+
+@router.get("/{collection_id}/export")
+def export_collection(
+    collection_id: int,
+    format: str = Query("txt", pattern="^(txt|csv)$"),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Exporta la lista de la colección a .txt o .csv (para NLE o edición)."""
+    from fastapi.responses import PlainTextResponse
+
+    col = _owned_collection(db, user, collection_id)
+    items = (
+        db.query(MediaItem)
+        .join(CollectionItem, CollectionItem.media_id == MediaItem.id)
+        .filter(CollectionItem.collection_id == col.id, MediaItem.deleted_at.is_(None))
+        .order_by(CollectionItem.position, CollectionItem.id)
+        .all()
+    )
+    safe_name = "".join(c for c in col.name if c.isalnum() or c in " -_").strip() or "lista"
+    if format == "csv":
+        lines = ["titulo,tipo,tags,descripcion,duracion_seg,tamano_mb"]
+        for it in items:
+            fields = [
+                it.title.replace('"', '""'),
+                it.kind,
+                ",".join(schemas.parse_tags(it.tags)).replace('"', '""'),
+                (it.description or "").replace('"', '""'),
+                str(it.duration_s or ""),
+                f"{it.size / (1024 * 1024):.2f}",
+            ]
+            lines.append(",".join(f'"{f}"' for f in fields))
+        content = "\n".join(lines) + "\n"
+        media_type = "text/csv"
+        filename = f"{safe_name}.csv"
+    else:
+        lines = [f"Lista: {col.name}", ""]
+        for it in items:
+            dur = f" · {it.duration_s}s" if it.duration_s else ""
+            size = f"{it.size / (1024 * 1024):.1f} MB"
+            tags = ", ".join(schemas.parse_tags(it.tags))
+            lines.append(f"- {it.title} [{it.kind}] · {size}{dur}" + (f" · {tags}" if tags else ""))
+        content = "\n".join(lines) + "\n"
+        media_type = "text/plain"
+        filename = f"{safe_name}.txt"
+    return PlainTextResponse(
+        content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.delete("/{collection_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -144,7 +226,7 @@ def add_item(
     db.add(CollectionItem(collection_id=col.id, media_id=media.id, position=position))
     db.commit()
     total = db.query(CollectionItem).filter(CollectionItem.collection_id == col.id).count()
-    return schemas.CollectionOut(id=col.id, name=col.name, item_count=total)
+    return schemas.CollectionOut.from_col(col, total)
 
 
 @router.delete("/{collection_id}/items/{media_id}", status_code=status.HTTP_204_NO_CONTENT)
