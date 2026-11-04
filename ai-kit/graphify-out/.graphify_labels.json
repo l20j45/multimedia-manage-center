@@ -1,5 +1,4 @@
 {
-  "0": "CI GitHub Actions",
   "1": "Base de datos y sesión",
   "2": "Dependencias frontend",
   "3": "Auth: login y recuperación",
@@ -7,9 +6,7 @@
   "5": "Dependencias Python",
   "6": "Config Tauri",
   "7": "Íconos de escritorio",
-  "8": "Íconos Android",
   "9": "Entry Vite y docs",
-  "10": "Config TypeScript",
   "11": "Alembic entorno",
   "12": "Servicio de email",
   "13": "Docker compose",
