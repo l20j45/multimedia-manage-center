@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # Espera: localhost (web dev), tauri.localhost (escritorio/APK) y tu dominio de producción.
     CORS_ORIGINS: str = "http://localhost:5173,http://tauri.localhost,https://tauri.localhost"
 
+    # Auto-tag con IA (opcional): llave de Gemini para sugerir tags al subir.
+    # Sin llave se usa la heurística local (duración/aspecto/nombre).
+    GEMINI_API_KEY: str = ""
+
     # Rate limiting por IP en /auth/* (login, registro, recuperación)
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_WINDOW: int = 60  # segundos por ventana

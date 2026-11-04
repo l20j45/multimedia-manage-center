@@ -154,6 +154,43 @@ def make_thumbnail(rel_path: str, kind: str) -> str | None:
     return str(Path(rel_path).parent / dst_name.name)
 
 
+def extract_audio(rel_path: str, kind: str) -> str | None:
+    """Extrae la pista de audio de un VIDEO → MP3 nuevo (para SFX).
+
+    Recodifica a mp3 `-q:a 2` (universal: te sirve aunque el original sea
+    AAC/opus/desktop). Devuelve la ruta relativa del audio o None.
+    """
+    ff = ffmpeg_bin()
+    if not ff:
+        return None
+    root = media_root()
+    src = root / rel_path
+    dst_name = f"{Path(rel_path).stem}_audio_{uuid.uuid4().hex[:6]}.mp3"
+    dst_abs = src.parent / dst_name
+    cmd = [
+        ff,
+        "-loglevel",
+        "error",
+        "-i",
+        str(src),
+        "-vn",
+        "-c:a",
+        "libmp3lame",
+        "-q:a",
+        "2",
+        "-y",
+        str(dst_abs),
+    ]
+    try:
+        subprocess.run(cmd, timeout=300, check=True, capture_output=True)
+    except Exception:  # noqa: BLE001
+        dst_abs.unlink(missing_ok=True)
+        return None
+    if not dst_abs.exists():
+        return None
+    return str(Path(rel_path).parent / dst_name)
+
+
 def trim_segment(rel_path: str, kind: str, start: float, end: float | None) -> str | None:
     """Corta [start→end] de un clip con ffmpeg -c copy → NUEVO fichero.
 

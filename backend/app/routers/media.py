@@ -25,6 +25,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app import schemas
+from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user, get_current_user_flexible
 from app.models import CollectionItem, MediaItem, User
@@ -301,6 +302,71 @@ def trim_media(
     db.commit()
     db.refresh(frag)
     return schemas.MediaOut.from_item(frag)
+
+
+@router.post(
+    "/{item_id}/extract-audio", response_model=schemas.MediaOut, status_code=status.HTTP_201_CREATED
+)
+def extract_audio(
+    item_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> schemas.MediaOut:
+    """Extrae la pista de audio de un VIDEO como recurso .mp3 nuevo.
+
+    Para el flujo SFX: subes un video de efectos, lo conviertes a audio con un
+    clic y luego lo recortas en el player con I/O.
+    """
+    item = _owned_item(db, user, item_id)
+    if item.kind != "video":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Solo aplica a videos")
+    rel = media_svc.extract_audio(item.path, item.kind)
+    if rel is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, detail="ffmpeg no disponible para extraer audio"
+        )
+    size = (media_svc.media_root() / rel).stat().st_size
+    audio = MediaItem(
+        owner_id=user.id,
+        kind="audio",
+        title=f"{item.title} (audio)",
+        tags=schemas.tags_csv(schemas.parse_tags(item.tags)),
+        description=f"Audio extraído de «{item.title}»",
+        visibility=item.visibility,
+        filename=Path(item.filename).stem + "_audio.mp3",
+        path=rel,
+        mime="audio/mpeg",
+        size=size,
+    )
+    audio.thumb_path = media_svc.make_thumbnail(rel, "audio")  # waveform
+    if media_svc.ffmpeg_bin():
+        audio.duration_s = media_svc.probe_duration(rel, "audio")
+    db.add(audio)
+    db.commit()
+    db.refresh(audio)
+    return schemas.MediaOut.from_item(audio)
+
+
+@router.post("/{item_id}/autotag", response_model=schemas.AutotagOut)
+def autotag(
+    item_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> schemas.AutotagOut:
+    """SUGIERE tags para un recurso (no aplica nada por sí solo).
+
+    Heurística local siempre; visión con Gemini solo si GEMINI_API_KEY está
+    en backend/.env. La UI muestra los chips y el usuario decide cuáles aplicar.
+    """
+    from app.services import autotag as autotag_svc
+
+    item = _owned_item(db, user, item_id)
+    existing = set(schemas.parse_tags(item.tags))
+    freshly = [t for t in autotag_svc.suggest_tags(item) if t not in existing][:12]
+    return schemas.AutotagOut(
+        suggestions=freshly,
+        source="gemini+heuristica" if getattr(settings, "GEMINI_API_KEY", "") else "heuristica",
+    )
 
 
 @router.post("/{item_id}/rethumb", response_model=schemas.MediaOut)

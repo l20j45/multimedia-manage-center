@@ -150,6 +150,11 @@ class RethumbIn(BaseModel):
     at: float = Field(0.0, description="Segundos del frame (negativo = cuenta atrás desde el fin)")
 
 
+class AutotagOut(BaseModel):
+    suggestions: list[str]
+    source: str
+
+
 class DuplicateGroups(BaseModel):
     groups: list[list[MediaOut]]
 
