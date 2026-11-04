@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     # Papelera: recursos borrados se purgan automáticamente tras N días.
     TRASH_RETENTION_DAYS: int = 30
 
+    # ffmpeg/ffprobe explícitos (opcional): útil cuando el PATH del proceso
+    # del server no los ve (apps GUI en Windows). En la Pi/Docker，
+    # apt/resuelto deja vacío y basta el `which` normal.
+    FFMPEG_PATH: str = ""
+    FFPROBE_PATH: str = ""
+
     # Rate limiting por IP en /auth/* (login, registro, recuperación)
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_WINDOW: int = 60  # segundos por ventana

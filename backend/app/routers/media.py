@@ -76,6 +76,14 @@ def upload(
     rel_path, size, mime, sha = media_svc.save_stream(
         file.file, original, user.id, file.content_type
     )
+    camera, fecha_orig = media_svc.exif_meta(media_svc.media_root() / rel_path, mime)
+    meta_fields: dict | None = None
+    if camera or fecha_orig:
+        meta_fields = {}
+        if camera:
+            meta_fields["camera"] = camera[:120]
+        if fecha_orig:
+            meta_fields["tomada_el"] = fecha_orig
     item = MediaItem(
         owner_id=user.id,
         kind=kind,
@@ -88,6 +96,7 @@ def upload(
         mime=mime[:100],
         size=size,
         sha256=sha,
+        meta=meta_fields,
     )
     item.thumb_path = media_svc.make_thumbnail(rel_path, kind)
     if media_svc.ffmpeg_bin():
@@ -405,15 +414,25 @@ def rethumb(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> schemas.MediaOut:
-    """Re-genera el thumbnail de un VIDEO usando el frame en `at` segundos."""
+    """Re-genera el thumbnail.
+
+    Video con `at`: toma ese frame. Sin `at` (o audio/imagen): regenera
+    según el tipo (frame 1 / waveform / copia reducida) para kindes que
+    quedaron sin thumb cuando faltaba ffmpeg.
+    """
     item = _owned_item(db, user, item_id)
-    if item.kind != "video":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Solo aplica a videos")
-    at = data.at if data.at >= 0 else max(0.0, (item.duration_s or 0) + data.at)
-    thumb = media_svc.rethumbnail_at(item.path, at)
-    if thumb:
-        item.thumb_path = thumb
-        db.commit()
+    if data.at is not None:
+        if item.kind != "video":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Solo videos aceptan `at`")
+        at = data.at if data.at >= 0 else max(0.0, (item.duration_s or 0) + data.at)
+        thumb = media_svc.rethumbnail_at(item.path, at)
+    else:
+        thumb = media_svc.make_thumbnail(item.path, item.kind)
+    if not thumb:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="ffmpeg no disponible")
+    item.thumb_path = thumb
+    db.commit()
+    db.refresh(item)
     return schemas.MediaOut.from_item(item)
 
 

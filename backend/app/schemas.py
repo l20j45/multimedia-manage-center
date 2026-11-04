@@ -155,7 +155,9 @@ class BulkResult(BaseModel):
 
 
 class RethumbIn(BaseModel):
-    at: float = Field(0.0, description="Segundos del frame (negativo = cuenta atrás desde el fin)")
+    at: float | None = Field(
+        None, description="Segundos del frame del video; None = regenerar por tipo"
+    )
 
 
 class AutotagOut(BaseModel):

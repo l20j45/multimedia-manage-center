@@ -21,9 +21,14 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
-def create_access_token(subject: str) -> str:
-    """Crea un JWT con el email del usuario como `sub`."""
-    expires = datetime.now(UTC) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+def create_access_token(subject: str, expires_delta: timedelta | None = None) -> str:
+    """Crea un JWT con el email del usuario como `sub`.
+
+    expires_delta: None → 24h por defecto; login con 'Recordarme' pasa 30 días.
+    """
+    expires = datetime.now(UTC) + (
+        expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
     payload: dict[str, Any] = {"sub": subject, "exp": expires}
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 

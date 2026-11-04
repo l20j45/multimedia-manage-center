@@ -87,9 +87,47 @@ def save_stream(
     return str(rel_path), size, mime, hasher.hexdigest()
 
 
+def exif_meta(abs_path: Path, mime: str) -> tuple[str, str]:
+    """(camera, fecha_orig) de los EXIF de una imagen; si no hay, ('', '')."""
+    if mime not in ("image/jpeg", "image/tiff"):
+        return "", ""
+    try:
+        from PIL import Image
+
+        img = Image.open(abs_path)
+        exif = img.getexif()
+        make = str(exif.get(0x010F, "") or "")
+        model = str(exif.get(0x0110, "") or "")
+        date_raw = str(exif.get(0x0132, "") or "")
+        camera = f"{make} {model}".strip()
+        fecha = date_raw.split(" ")[0].replace(":", "-", 2) if date_raw else ""
+        return camera, fecha
+    except Exception:  # noqa: BLE001
+        return "", ""
+
+
 def ffmpeg_bin() -> str | None:
-    """Ruta de ffmpeg si está disponible en PATH (si no, None): degradación suave."""
+    """Ruta de ffmpeg: FFMPEG_PATH del .env si existe, si no `which`.
+
+    (El PATH del proceso del server puede no ver mise/apps GUI — override.
+    """
+    if settings.FFMPEG_PATH:
+        from pathlib import Path as _P
+
+        p = _P(settings.FFMPEG_PATH)
+        if p.exists():
+            return str(p)
     return shutil.which("ffmpeg")
+
+
+def ffprobe_bin() -> str | None:
+    if settings.FFPROBE_PATH:
+        from pathlib import Path as _P
+
+        p = _P(settings.FFPROBE_PATH)
+        if p.exists():
+            return str(p)
+    return shutil.which("ffprobe")
 
 
 def make_thumbnail(rel_path: str, kind: str) -> str | None:
@@ -259,7 +297,7 @@ def probe_duration(rel_path: str, kind: str) -> float | None:
     """Duración en segundos para audio/video via ffprobe (None si no disponible)."""
     if kind not in ("audio", "video"):
         return None
-    ffprobe = shutil.which("ffprobe")
+    ffprobe = ffprobe_bin()
     if not ffprobe:
         return None
     src = media_root() / rel_path

@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -43,15 +43,21 @@ def register(
 
 @router.post("/login", response_model=schemas.Token)
 def login(
-    form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)
+    form: OAuth2PasswordRequestForm = Depends(),
+    remember: bool = Form(False),
+    db: Session = Depends(get_db),
 ) -> schemas.Token:
-    """Login con email (campo `username`) y contraseña. Devuelve un token JWT."""
+    """Login con email (campo `username`) y contraseña. Devuelve un token JWT.
+
+    `remember=true` extiende la sesión a 30 días (default 24h).
+    """
     user = db.query(User).filter(User.email == form.username).first()
     if user is None or not security.verify_password(form.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales incorrectas"
         )
-    return schemas.Token(access_token=security.create_access_token(user.email))
+    expires = timedelta(days=30) if remember else None
+    return schemas.Token(access_token=security.create_access_token(user.email, expires))
 
 
 @router.get("/me", response_model=schemas.UserOut)
