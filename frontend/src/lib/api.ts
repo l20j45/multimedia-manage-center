@@ -58,8 +58,13 @@ export function register(email: string, name: string, password: string): Promise
   });
 }
 
-export async function login(email: string, password: string): Promise<User> {
+export async function login(
+  email: string,
+  password: string,
+  remember = false,
+): Promise<User> {
   const form = new URLSearchParams({ username: email, password });
+  if (remember) form.append("remember", "true");
   const data = await request<{ access_token: string }>("/auth/login", {
     method: "POST",
     body: form.toString(),
@@ -256,8 +261,15 @@ export function listDuplicates(): Promise<{ groups: MediaItem[][] }> {
   return request("/media/duplicates");
 }
 
-export function rethumbMedia(id: number, atSeconds: number): Promise<MediaItem> {
-  return request(`/media/${id}/rethumb`, { method: "POST", body: JSON.stringify({ at: atSeconds }) });
+/** Re-genera miniatura: con `at` toma ese frame del video; con null, por tipo. */
+export function rethumbMedia(
+  id: number,
+  atSeconds: number | null = null,
+): Promise<MediaItem> {
+  return request(`/media/${id}/rethumb`, {
+    method: "POST",
+    body: JSON.stringify({ at: atSeconds }),
+  });
 }
 
 export function exportUrl(id: number, format: "txt" | "csv" = "txt"): string {

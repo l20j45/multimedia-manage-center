@@ -208,6 +208,22 @@ export default function DetailPanel({
                 {extracting ? "Extrayendo…" : "🎧 Extraer audio"}
               </button>
             )}
+            <button
+              className="ghost"
+              onClick={async () => {
+                setError("");
+                try {
+                  const upd = await rethumbMedia(cur.id, null);
+                  setCur(upd);
+                  onChanged(upd);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Error al regenerar miniatura");
+                }
+              }}
+              title="Regenera miniatura/frame/waveform según el tipo (para recursos que quedaron sin thumb)"
+            >
+              ♻ Miniatura
+            </button>
             <button className="ghost" onClick={() => onAddToCollectionPicker(cur)}>＋ Colección</button>
             {cur.deleted ? (
               <span className="chip danger-static">En papelera</span>

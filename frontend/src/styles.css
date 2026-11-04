@@ -510,6 +510,17 @@ button.ghost:hover { border-color: var(--accent); color: var(--accent); }
 }
 .link:hover { color: #ffd37a; }
 
+.remember-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.remember-row input { accent-color: var(--accent); }
+
 /*---------------
    TOPBAR + identidad film
 ---------------*/

@@ -12,6 +12,7 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: (user: User) => 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [remember, setRemember] = useState(true);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -38,7 +39,13 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: (user: User) => 
         setInfo(`¡Cuenta creada para ${created.email}! Ya puedes iniciar sesión.`);
         setMode("login");
       } else {
-        onLoggedIn(await login(email, password));
+        await onLoggedIn(
+          await login(
+            email,
+            password,
+            remember,
+          ),
+        );
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error inesperado");
@@ -103,6 +110,16 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: (user: User) => 
         )}
         {error && <p className="error">{error}</p>}
         {info && <p className="ok">{info}</p>}
+        {mode === "login" && (
+          <label className="remember-row">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            Recordarme 30 días
+          </label>
+        )}
         <button className="primary" disabled={busy}>
           {busy
             ? "Enviando..."
