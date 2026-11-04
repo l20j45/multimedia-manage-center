@@ -614,3 +614,37 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
 }
+
+/*---------------
+   STARS (favoritos)
+---------------*/
+.stars { display: inline-flex; gap: 1px; }
+.stars .star {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0 1px;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: #3d4450;
+  transition: color .1s ease, transform .1s ease;
+}
+.stars .star.on { color: var(--accent); text-shadow: 0 0 8px #f5b84155; }
+.stars .star:hover { transform: scale(1.25); color: var(--accent); }
+.stars.big .star { font-size: 1.25rem; }
+
+.player-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+.player-title-row .sub { margin: 0; }
+
+.trim-bar {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.trim-bar .chip.active:disabled { opacity: 0.45; cursor: not-allowed; }

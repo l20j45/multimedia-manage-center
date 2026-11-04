@@ -105,6 +105,7 @@ export interface MediaItem {
   duration_s: number | null;
   has_thumb: boolean;
   visibility: "private" | "team";
+  rating: number;
   deleted: boolean;
   created_at: string;
 }
@@ -121,10 +122,11 @@ export interface MediaQuery {
   tag_no?: string | null;
   collection?: number | null;
   scope?: "mine" | "team";
-  order?: "created" | "title" | "size" | "duration";
+  order?: "created" | "title" | "size" | "duration" | "rating";
   direction?: "asc" | "desc";
   since?: string | null;
   until?: string | null;
+  min_rating?: number | null;
   trash?: boolean;
   limit?: number;
   offset?: number;
@@ -183,9 +185,24 @@ export function updateMedia(
     description?: string;
     meta?: Record<string, string>;
     visibility?: "private" | "team";
+    rating?: number;
   },
 ): Promise<MediaItem> {
   return request(`/media/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+}
+
+/** Corta [start→end] de un clip (sin re-subir) y devuelve el recurso nuevo. */
+export function trimMedia(
+  id: number,
+  start: number,
+  end: number | null,
+  title?: string,
+  tags?: string[],
+): Promise<MediaItem> {
+  return request(`/media/${id}/trim`, {
+    method: "POST",
+    body: JSON.stringify({ start, end, title: title || undefined, tags: tags || undefined }),
+  });
 }
 
 export function deleteMedia(id: number): Promise<void> {

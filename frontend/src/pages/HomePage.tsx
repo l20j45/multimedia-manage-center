@@ -14,6 +14,7 @@ import {
   removeCollectionItem,
   restoreMedia,
   rethumbMedia,
+  trimMedia,
   updateMe,
   updateMedia,
   uploadMedia,
@@ -119,6 +120,10 @@ export default function HomePage({
     visibility: "private" as "private" | "team",
   });
   const [playing, setPlaying] = useState<MediaItem | null>(null);
+  const [trimIn, setTrimIn] = useState<number | null>(null);
+  const [trimOut, setTrimOut] = useState<number | null>(null);
+  const [trimBusy, setTrimBusy] = useState(false);
+  const [minRating, setMinRating] = useState(false);
   const [dupesOpen, setDupesOpen] = useState(false);
   const [dupes, setDupes] = useState<MediaItem[][]>([]);
 
@@ -140,11 +145,12 @@ export default function HomePage({
       scope,
       order,
       direction,
+      min_rating: minRating ? 3 : null,
       kind: (tab === "all" || tab === "trash" ? undefined : tab) as
         | MediaKind
         | undefined,
     }),
-    [debouncedQ, activeTag, scope, order, direction, tab],
+    [debouncedQ, activeTag, scope, order, direction, tab, minRating],
   );
 
   const loadItems = useCallback(
@@ -467,9 +473,55 @@ export default function HomePage({
     }
   }
 
+  function resetTrim() {
+    setTrimIn(null);
+    setTrimOut(null);
+  }
+
+  async function cutSegment() {
+    if (!playing || playing.kind === "image") return;
+    if (trimIn === null || trimOut === null) {
+      setListError("Marca primero In (I) y Out (O).");
+      return;
+    }
+    if (trimOut <= trimIn) {
+      setListError("Out debe ir después de In.");
+      return;
+    }
+    setTrimBusy(true);
+    try {
+      const frag = await trimMedia(playing.id, trimIn, trimOut);
+      setPlaying(null);
+      resetTrim();
+      setBulkMsg(`✂ fragmento creado: ${frag.title}`);
+      await Promise.all([loadItems(0, true), loadTags()]);
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : "Error al cortar");
+    } finally {
+      setTrimBusy(false);
+    }
+  }
+
+  async function rateItem(item: MediaItem, stars: number) {
+    const target = item.rating === stars ? 0 : stars;
+    try {
+      const updated = await updateMedia(item.id, { rating: target });
+      setItems((prev) => prev.map((i) => (i.id === updated.id ? { ...i, rating: updated.rating } : i)));
+      await loadTags();
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : "Error al valorar");
+    }
+  }
+
   function playFrom(idx: number) {
     if (idx >= 0 && idx < items.length) setPlaying(items[idx]);
   }
+
+  // al cambiar de reproducido reinicia los marcadores In/Out
+  useEffect(() => {
+    setTrimIn(null);
+    setTrimOut(null);
+  }, [playing?.id]);
 
   /* ----------------------------------------------------------- shortcuts */
   useEffect(() => {
@@ -477,6 +529,14 @@ export default function HomePage({
       const target = e.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") {
         if (e.key === "Escape") (target as HTMLInputElement).blur();
+        return;
+      }
+      if (e.key === "I" && playing && playing.kind !== "image") {
+        setTrimIn(videoRef.current?.currentTime ?? 0);
+        return;
+      }
+      if (e.key === "O" && playing && playing.kind !== "image") {
+        setTrimOut(videoRef.current?.currentTime ?? 0);
         return;
       }
       if (e.key === "/") {
@@ -504,6 +564,51 @@ export default function HomePage({
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing, items, addItemFor, editing, profileOpen, uploadOpen, dupesOpen, selectedIds]);
+
+  /* -------------------------------------------------- pasted desde clipboard */
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      if (playing || uploadOpen || editing || addItemFor || profileOpen || dupesOpen) return;
+      const files: File[] = [];
+      const dt = e.clipboardData;
+      if (!dt) return;
+      if (dt.files && dt.files.length > 0) {
+        // archivos reales copiados desde el explorador
+        Array.from(dt.files).forEach((f) => files.push(f));
+      } else {
+        const itemsPaste = Array.from(dt.items ?? []);
+        for (const it of itemsPaste) {
+          if (it.kind === "file") {
+            const f = it.getAsFile();
+            if (f) {
+              // imagen copiada (ej. captura): dar nombre comprensible
+              const ext = f.type.includes("png") ? "png" : f.type.split("/")[1] || "bin";
+              files.push(new File([f], `pegado-${Date.now()}.${ext}`, { type: f.type }));
+            }
+          }
+        }
+      }
+      const media_files = files.filter((f) => /\.(png|jpe?g|gif|webp|avif|bmp|mp3|wav|ogg|oga|m4a|flac|aac|opus|weba|mp4|mov|webm|mkv|avi|m4v)$/i.test(f.name));
+      if (media_files.length === 0) return;
+      e.preventDefault();
+      if (media_files.length > 1) void handleDropped({ clipboardData: { files: media_files }, preventDefault() {} } as unknown as React.DragEvent);
+      else void doQuickUpload(media_files[0]);
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, uploadOpen, editing, addItemFor, profileOpen, dupesOpen, visibility]);
+
+  async function doQuickUpload(f: File) {
+    setBulkMsg("");
+    try {
+      await uploadMedia(f, f.name.replace(/\.[^.]+$/, ""), "", undefined, { visibility });
+      setBulkMsg(`📋 pegado y subido: ${f.name}`);
+      await Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
+    } catch (err) {
+      setBulkMsg(err instanceof Error ? err.message : "Error al pegar");
+    }
+  }
 
   /* ------------------------------------------------------------ profile */
   async function handleSaveProfile(e: React.FormEvent) {
@@ -732,11 +837,40 @@ export default function HomePage({
             {playing.kind === "audio" && <audio controls autoPlay src={mediaUrl(playing.id, "file")} />}
             {playing.kind === "image" && <img src={mediaUrl(playing.id, "file")} alt={playing.title} />}
             <div className="player-caption">
-              <p className="sub">{playing.title}</p>
+              <div className="player-title-row">
+                <p className="sub">{playing.title}</p>
+                <Stars rating={playing.rating} big onRate={(s) => rateItem(playing, s)} />
+              </div>
               {playing.description && <p className="sub muted">{playing.description}</p>}
               {playing.meta?.camera && <p className="sub muted">📹 {playing.meta.camera}</p>}
               {(playing.kind === "video" || playing.kind === "audio") && (
-                <p className="sub muted">← → para navegar · Esc cierra</p>
+                <>
+                  <p className="sub muted">← → navegar · I marca In · O marca Out · Esc cierra</p>
+                  <div className="trim-bar">
+                    <button
+                      className="chip"
+                      onClick={() => setTrimIn(videoRef.current?.currentTime ?? 0)}
+                      title="Marcar In (tecla I)"
+                    >
+                      [ In {trimIn === null ? "" : trimIn.toFixed(1) + "s"} ]
+                    </button>
+                    <button
+                      className="chip"
+                      onClick={() => setTrimOut(videoRef.current?.currentTime ?? 0)}
+                      title="Marcar Out (tecla O)"
+                    >
+                      [ Out {trimOut === null ? "" : trimOut.toFixed(1) + "s"} ]
+                    </button>
+                    <button
+                      className="chip active"
+                      disabled={trimBusy || trimIn === null || trimOut === null}
+                      onClick={cutSegment}
+                      title="Crea un re-scurso nuevo con el fragmento"
+                    >
+                      {trimBusy ? "Cortando…" : "✂ Cortar In→Out"}
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -828,7 +962,18 @@ export default function HomePage({
           <option value="size:asc">Ligeros primero</option>
           <option value="duration:desc">Más largos</option>
           <option value="duration:asc">Más cortos</option>
+          <option value="rating:desc">★ Mejor valorados</option>
         </select>
+        {!inTrash && (
+          <button
+            className={`chip${minRating ? " active" : ""}`}
+            onClick={() => setMinRating((v) => !v)}
+            title="Solo recursos valorados con 3+ estrellas"
+            aria-label="Filtrar favoritos"
+          >
+            ★ Favoritos
+          </button>
+        )}
         <button className="primary" onClick={() => setUploadOpen(true)}>
           + Subir
         </button>
@@ -1005,6 +1150,7 @@ export default function HomePage({
                     activeColId={selectedCol?.id}
                     onRemoveFromCol={() => handleRemoveFromCollection(item)}
                     onTagClick={setActiveTag}
+                    onRate={(s) => rateItem(item, s)}
                   />
                 ))}
               </div>
@@ -1032,6 +1178,7 @@ export default function HomePage({
                     <th>Título</th>
                     <th>Tipo</th>
                     <th>Tags</th>
+                    <th>★</th>
                     <th>Tamaño</th>
                     <th>Duración</th>
                     <th>Acciones</th>
@@ -1051,6 +1198,7 @@ export default function HomePage({
                       onDelete={() => handleDelete(item)}
                       onEdit={() => openEdit(item)}
                       onAddToCollection={() => setAddItemFor(item)}
+                      onRate={(s) => rateItem(item, s)}
                     />
                   ))}
                 </tbody>
@@ -1083,6 +1231,35 @@ function Thumb({ item, className }: { item: MediaItem; className?: string }) {
   );
 }
 
+function Stars({
+  rating,
+  onRate,
+  big,
+}: {
+  rating: number;
+  onRate?: (stars: number) => void;
+  big?: boolean;
+}) {
+  return (
+    <span className={`stars${big ? " big" : ""}`}>
+      {[1, 2, 3, 4, 5].map((s) => (
+        <button
+          key={s}
+          className={`star${s <= rating ? " on" : ""}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRate?.(s);
+          }}
+          aria-label={`Valorar ${s} estrella${s > 1 ? "s" : ""}`}
+          title={onRate ? `Valorar ${s}` : `${rating} estrellas`}
+        >
+          ★
+        </button>
+      ))}
+    </span>
+  );
+}
+
 function GridCard({
   item,
   trash,
@@ -1098,6 +1275,7 @@ function GridCard({
   hasCollections,
   activeColId,
   onTagClick,
+  onRate,
 }: {
   item: MediaItem;
   trash?: boolean;
@@ -1113,6 +1291,7 @@ function GridCard({
   hasCollections?: boolean;
   activeColId?: number;
   onTagClick?: (t: string) => void;
+  onRate?: (stars: number) => void;
 }) {
   return (
     <article className={`media-card${selected ? " selected" : ""}`}>
@@ -1137,6 +1316,7 @@ function GridCard({
                 {t}
               </button>
             ))}
+            {onRate && <Stars rating={item.rating} onRate={(s) => onRate(s)} />}
           </div>
         )}
         <span className="media-meta">
@@ -1217,6 +1397,7 @@ function ListRow({
   onRestore,
   onPurge,
   onAddToCollection,
+  onRate,
 }: {
   item: MediaItem;
   inTrash: boolean;
@@ -1228,6 +1409,7 @@ function ListRow({
   onRestore?: () => void;
   onPurge?: () => void;
   onAddToCollection?: () => void;
+  onRate?: (stars: number) => void;
 }) {
   return (
     <tr className={selected ? "selected" : ""}>
@@ -1244,6 +1426,13 @@ function ListRow({
       </td>
       <td>{KIND_ICON[item.kind]}</td>
       <td className="muted">{item.tags.join(", ")}</td>
+      <td>
+        {onRate ? (
+          <Stars rating={item.rating} onRate={(s) => onRate(s)} />
+        ) : (
+          "★".repeat(item.rating)
+        )}
+      </td>
       <td>{fmtSize(item.size)}</td>
       <td>{fmtDuration(item.duration_s)}</td>
       <td className="row-actions">
