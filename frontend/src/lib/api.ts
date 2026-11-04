@@ -25,8 +25,15 @@ export function clearToken(): void {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (options.body) headers["Content-Type"] = "application/json";
+  // Headers del caller primero; request() solo AÑADE (no pisa) Content-Type
+  // ni Authorization: el login necesita application/x-www-form-urlencoded y
+  // el resto JSON (#bug 422 en /auth/login cuando el caller sobreescribía).
+  const headers: Record<string, string> = {
+    ...((options.headers as Record<string, string>) ?? {}),
+  };
+  if (options.body && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
