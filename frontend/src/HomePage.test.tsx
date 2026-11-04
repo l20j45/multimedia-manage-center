@@ -26,6 +26,13 @@ vi.mock("./lib/api", () => ({
   deleteMedia: vi.fn(),
   uploadMedia: vi.fn(),
   updateMe: vi.fn(),
+  exportUrl: () => "http://fake/export",
+  listDuplicates: vi.fn(async () => ({ groups: [] })),
+  bulkMedia: vi.fn(),
+  restoreMedia: vi.fn(),
+  purgeMedia: vi.fn(),
+  rethumbMedia: vi.fn(),
+  createCollection: vi.fn(),
 }));
 
 const USER = { id: 1, email: "yo@x.com", name: "Yo", is_active: true };
@@ -70,7 +77,9 @@ describe("HomePage (biblioteca)", () => {
   it("la búsqueda llama al endpoint con q tras el debounce", async () => {
     const user = userEvent.setup({ delay: null });
     render(<HomePage user={USER} onChange={() => {}} onLogout={() => {}} />);
-    const box = await screen.findByPlaceholderText("Buscar por nombre o tag...");
+    const box = (await screen
+      .findAllByPlaceholderText(/Buscar por nombre/)
+      .then((els) => els[0])) as HTMLInputElement;
     await user.type(box, "logo");
     // el debounce es de 300ms
     await new Promise((r) => setTimeout(r, 400));

@@ -96,12 +96,16 @@ export interface MediaItem {
   kind: MediaKind;
   title: string;
   tags: string[];
+  description: string;
+  meta: Record<string, string> | null;
   filename: string;
   path: string;
   mime: string;
   size: number;
   duration_s: number | null;
   has_thumb: boolean;
+  visibility: "private" | "team";
+  deleted: boolean;
   created_at: string;
 }
 
@@ -110,23 +114,28 @@ export interface MediaList {
   total: number;
 }
 
-export function listMedia(
-  params: {
-    q?: string;
-    kind?: MediaKind;
-    tag?: string;
-    collection?: number;
-    limit?: number;
-    offset?: number;
-  } = {},
-): Promise<MediaList> {
+export interface MediaQuery {
+  q?: string;
+  kind?: MediaKind;
+  tag?: string | null;
+  tag_no?: string | null;
+  collection?: number | null;
+  scope?: "mine" | "team";
+  order?: "created" | "title" | "size" | "duration";
+  direction?: "asc" | "desc";
+  since?: string | null;
+  until?: string | null;
+  trash?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export function listMedia(params: MediaQuery = {}): Promise<MediaList> {
   const search = new URLSearchParams();
-  if (params.q) search.set("q", params.q);
-  if (params.kind) search.set("kind", params.kind);
-  if (params.tag) search.set("tag", params.tag);
-  if (params.collection) search.set("collection", String(params.collection));
-  if (params.limit) search.set("limit", String(params.limit));
-  if (params.offset) search.set("offset", String(params.offset));
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === false) continue;
+    search.set(k, String(v));
+  }
   const qs = search.toString();
   return request(`/media${qs ? `?${qs}` : ""}`);
 }
@@ -137,12 +146,15 @@ export function uploadMedia(
   title: string,
   tagsCsv: string,
   onProgress?: (pct: number) => void,
+  extra: { description?: string; visibility?: "private" | "team" } = {},
 ): Promise<MediaItem> {
   return new Promise((resolve, reject) => {
     const form = new FormData();
     form.append("file", file);
     form.append("title", title);
     form.append("tags", tagsCsv);
+    if (extra.description) form.append("description", extra.description);
+    if (extra.visibility) form.append("visibility", extra.visibility);
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${API_BASE}/media`);
@@ -165,13 +177,51 @@ export function uploadMedia(
 
 export function updateMedia(
   id: number,
-  data: { title?: string; tags?: string[] },
+  data: {
+    title?: string;
+    tags?: string[];
+    description?: string;
+    meta?: Record<string, string>;
+    visibility?: "private" | "team";
+  },
 ): Promise<MediaItem> {
   return request(`/media/${id}`, { method: "PATCH", body: JSON.stringify(data) });
 }
 
 export function deleteMedia(id: number): Promise<void> {
   return request(`/media/${id}`, { method: "DELETE" });
+}
+
+export function bulkMedia(
+  ids: number[],
+  action: "add_tag" | "remove_tag" | "set_visibility" | "delete" | "restore" | "purge" | "add_to_collection",
+  extra: { tags?: string[]; visibility?: "private" | "team"; collection_id?: number } = {},
+): Promise<{ done: number; requested: number }> {
+  return request("/media/bulk", {
+    method: "POST",
+    body: JSON.stringify({ ids, action, ...extra }),
+  });
+}
+
+export function restoreMedia(id: number): Promise<MediaItem> {
+  return request(`/media/${id}/restore`, { method: "POST" });
+}
+
+export function purgeMedia(id: number): Promise<void> {
+  return request(`/media/${id}/purge`, { method: "DELETE" });
+}
+
+export function listDuplicates(): Promise<{ groups: MediaItem[][] }> {
+  return request("/media/duplicates");
+}
+
+export function rethumbMedia(id: number, atSeconds: number): Promise<MediaItem> {
+  return request(`/media/${id}/rethumb`, { method: "POST", body: JSON.stringify({ at: atSeconds }) });
+}
+
+export function exportUrl(id: number, format: "txt" | "csv" = "txt"): string {
+  const token = getToken() ?? "";
+  return `${API_BASE}/collections/${id}/export?format=${format}&access_token=${encodeURIComponent(token)}`;
 }
 
 export function listTags(): Promise<{ tag: string; count: number }[]> {
@@ -189,14 +239,19 @@ export interface Collection {
   id: number;
   name: string;
   item_count: number;
+  is_project: boolean;
 }
 
 export function listCollections(): Promise<Collection[]> {
   return request("/collections");
 }
 
-export function createCollection(name: string): Promise<Collection> {
-  return request("/collections", { method: "POST", body: JSON.stringify({ name }) });
+export function createCollection(name: string, isProject = false): Promise<Collection> {
+  return request("/collections", { method: "POST", body: JSON.stringify({ name, is_project: isProject }) });
+}
+
+export function updateCollection(id: number, data: { name?: string; is_project?: boolean }): Promise<Collection> {
+  return request(`/collections/${id}`, { method: "PATCH", body: JSON.stringify(data) });
 }
 
 export function deleteCollection(id: number): Promise<void> {
