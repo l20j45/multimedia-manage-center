@@ -312,6 +312,30 @@ button.media-visual img {
 .modal.player audio { width: 100%; }
 .modal.player .sub { color: #d1d5db; margin: 0; }
 
+/* Botón-descarga dentro de .media-actions (es un <a> que imita a .ghost) */
+.action-link {
+  background: none;
+  border: none;
+  text-decoration: none;
+  color: inherit;
+  padding: 0.3rem 0.5rem;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  line-height: 1;
+  display: inline-block;
+}
+.action-link:hover { background: #eef2ff; }
+
+/* Perfil como modal */
+.profile-card { width: min(420px, 94vw); display: flex; flex-direction: column; gap: 0.4rem; }
+.profile-card .row { margin-top: 0.5rem; }
+.profile-card .row .primary { width: auto; flex: 1; }
+
+/* Pulido de cards: títulos sin monospace-espacio raro, acciones alineadas */
+.media-actions { align-items: center; }
+.media-title { letter-spacing: 0.01em; }
+.media-card:hover { box-shadow: 0 4px 14px rgb(15 23 42 / 0.10); border-color: #c7d2fe; }
+
 .empty {
   border: 2px dashed #d1d5db;
   border-radius: 12px;

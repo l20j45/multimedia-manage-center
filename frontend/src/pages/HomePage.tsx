@@ -317,19 +317,19 @@ export default function HomePage({
           <button
             className="ghost"
             aria-label="Mi perfil"
-            onClick={() => setProfileOpen((v) => !v)}
+            onClick={() => setProfileOpen(true)}
           >
-            Perfil
-          </button>
-          <button className="ghost" onClick={onLogout}>
-            Cerrar sesión
+            {user.name || "Perfil"}
           </button>
         </div>
       </header>
 
       {profileOpen && (
-        <main className="content">
-          <div className="card">
+        <div className="overlay" onClick={() => setProfileOpen(false)}>
+          <main
+            className="card profile-card"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h2>Perfil</h2>
             <p className="sub">Sesión iniciada como {user.email}</p>
             <form onSubmit={handleSaveProfile}>
@@ -340,12 +340,24 @@ export default function HomePage({
                 onChange={(e) => setName(e.target.value)}
               />
               {profileError && <p className="error">{profileError}</p>}
-              <button className="primary" disabled={busy}>
-                {busy ? "Guardando..." : "Guardar"}
-              </button>
+              <div className="row">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    setProfileOpen(false);
+                    onLogout();
+                  }}
+                >
+                  Cerrar sesión
+                </button>
+                <button className="primary" disabled={busy}>
+                  {busy ? "Guardando..." : "Guardar"}
+                </button>
+              </div>
             </form>
-          </div>
-        </main>
+          </main>
+        </div>
       )}
 
       {uploadOpen && (
@@ -604,6 +616,15 @@ export default function HomePage({
                         </button>
                       )
                     )}
+                    <a
+                      className="ghost action-link"
+                      href={mediaUrl(item.id, "file")}
+                      download={item.filename}
+                      aria-label={`Descargar ${item.title}`}
+                      title={`Descargar (${item.filename})`}
+                    >
+                      ⬇
+                    </a>
                     <button
                       className="ghost"
                       onClick={() => setPlaying(item)}
