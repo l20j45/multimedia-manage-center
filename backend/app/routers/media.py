@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app import schemas
 from app.database import get_db
 from app.deps import get_current_user, get_current_user_flexible
-from app.models import MediaItem, User
+from app.models import CollectionItem, MediaItem, User
 from app.services import media as media_svc
 
 router = APIRouter(prefix="/media", tags=["media"])
@@ -87,13 +87,23 @@ def list_media(
     q: str | None = Query(None, max_length=100, description="Busca en título O tags"),
     kind: schemas.MediaKind | None = None,
     tag: str | None = Query(None, max_length=50, description="Filtra por UN tag"),
+    collection: int | None = Query(None, description="Solo recursos de esta colección"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> schemas.MediaList:
     """Lista/búsqueda de la biblioteca del usuario (por nombre o tags)."""
-    base = db.query(MediaItem).filter(MediaItem.owner_id == user.id)
+    base = (
+        db.query(MediaItem)
+        .join(CollectionItem, CollectionItem.media_id == MediaItem.id)
+        .filter(
+            MediaItem.owner_id == user.id,
+            CollectionItem.collection_id == collection,
+        )
+        if collection is not None
+        else db.query(MediaItem).filter(MediaItem.owner_id == user.id)
+    )
     if kind:
         base = base.filter(MediaItem.kind == kind)
     if q and q.strip():
@@ -153,8 +163,10 @@ def delete_item(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Response:
-    """Elimina un recurso propio (fila + ficheros físicos)."""
+    """Elimina un recurso propio (fila + ficheros físicos + pertenencias)."""
     item = _owned_item(db, user, item_id)
+    # SQLite no asegura cascada sin PRAGMA: limpia colecciones manualmente
+    db.query(CollectionItem).filter(CollectionItem.media_id == item.id).delete()
     db.delete(item)
     db.commit()
     media_svc.delete_files([item.path, item.thumb_path])

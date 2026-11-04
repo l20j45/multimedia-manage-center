@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from alembic import command
 from app.config import settings
 from app.rate_limit import RateLimitMiddleware
-from app.routers import auth, health, media, users
+from app.routers import auth, collections, health, media, users
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -41,3 +41,4 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(media.router)
+app.include_router(collections.router)

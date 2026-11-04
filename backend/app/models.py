@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+import sqlalchemy as sa
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -58,3 +59,29 @@ class MediaItem(Base):
     size: Mapped[int] = mapped_column(nullable=False)  # bytes
     duration_s: Mapped[float | None] = mapped_column(nullable=True)  # audio/video (ffprobe)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Collection(Base):
+    """Colección (álbum/playlist) de la biblioteca de un usuario."""
+
+    __tablename__ = "collections"
+    __table_args__ = (sa.UniqueConstraint("owner_id", "name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CollectionItem(Base):
+    """Un recurso de la biblioteca dentro de una colección (N:M, ordenable)."""
+
+    __tablename__ = "collection_items"
+    __table_args__ = (sa.UniqueConstraint("collection_id", "media_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    collection_id: Mapped[int] = mapped_column(
+        ForeignKey("collections.id"), index=True, nullable=False
+    )
+    media_id: Mapped[int] = mapped_column(ForeignKey("media_items.id"), index=True, nullable=False)
+    position: Mapped[int] = mapped_column(nullable=False, default=0)

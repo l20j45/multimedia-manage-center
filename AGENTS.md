@@ -30,7 +30,7 @@ backend/
     security.py    # bcrypt + JWT
     deps.py        # session BD + usuario actual
     rate_limit.py  # rate limiting por IP
-    routers/       # health, auth, users, media
+    routers/       # health, auth, users, media, collections
     services/      # email (SMTP o console), media (uploads + thumbs ffmpeg/Pillow)
   alembic/         # migraciones; versions/ 0001, 0002…
   tests/           # pytest (smoke + rate limit)

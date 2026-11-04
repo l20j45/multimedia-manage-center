@@ -113,3 +113,18 @@ class MediaUpdate(BaseModel):
 class TagCount(BaseModel):
     tag: str
     count: int
+
+
+# ------------------------------------------------------------- Colecciones
+class CollectionCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class CollectionAddItem(BaseModel):
+    media_id: int
+
+
+class CollectionOut(BaseModel):
+    id: int
+    name: str
+    item_count: int
