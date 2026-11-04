@@ -30,8 +30,8 @@ backend/
     security.py    # bcrypt + JWT
     deps.py        # session BD + usuario actual
     rate_limit.py  # rate limiting por IP
-    routers/       # health, auth, users
-    services/      # email (SMTP o console)
+    routers/       # health, auth, users, media
+    services/      # email (SMTP o console), media (uploads + thumbs ffmpeg/Pillow)
   alembic/         # migraciones; versions/ 0001, 0002…
   tests/           # pytest (smoke + rate limit)
   pyproject.toml   # FUENTE DE VERDAD de dependencias + config ruff/pytest

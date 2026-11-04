@@ -20,6 +20,7 @@ dependencies = [
     "pyjwt==2.15.1",
     "email-validator==2.3.0",
     "python-multipart==0.0.33",
+    "pillow>=13.0.0",
 ]
 
 [dependency-groups]

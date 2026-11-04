@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     RATE_LIMIT_REGISTER: int = 5
     RATE_LIMIT_PASSWORD_RESET: int = 5
 
+    # Biblioteca de medios: carpeta de ficheros y subida máxima (MB)
+    MEDIA_DIR: str = "uploads"
+    MAX_UPLOAD_MB: int = 1024
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

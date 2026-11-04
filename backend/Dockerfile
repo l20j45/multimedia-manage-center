@@ -18,6 +18,10 @@ ENV UV_COMPILE_BYTECODE=1 \
 COPY pyproject.toml ./
 RUN uv sync --no-dev
 
+# ffmpeg/ffprobe: primer frame del video como thumbnail + duración
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 # Después el código (app + migraciones Alembic)
 COPY app ./app
 COPY alembic ./alembic

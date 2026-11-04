@@ -22,6 +22,9 @@ dist/
 # Solo el output local en la raíz; el kit pre-trenzado ai-kit/graphify-out/ SÍ se commitea.
 /graphify-out/
 
+# --- Biblioteca de mensajes (ficheros de usuarios, fuera del repo) ---
+backend/uploads/
+
 # --- IDE / OS ---
 .idea/
 .vscode/

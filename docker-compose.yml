@@ -14,6 +14,8 @@ services:
     environment:
       # Ruta de la BD dentro del contenedor (volumen persistente)
       DATABASE_URL: sqlite:////app/data/app.db
+      # Ficheros multimedia del usuario (persistentes entre recreaciones)
+      MEDIA_DIR: /app/data/uploads
     volumes:
       - api-data:/app/data
     restart: unless-stopped

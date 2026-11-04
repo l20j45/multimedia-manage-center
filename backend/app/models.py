@@ -30,3 +30,31 @@ class PasswordResetToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MediaItem(Base):
+    """Recurso de la biblioteca (audio / imagen / video) de un usuario.
+
+    Los ficheros viven en MEDIA_DIR/{owner_id}/ (no en la BD); aquí solo
+    metadata. Los tags van como CSV en una columna: la búsqueda por tag
+    (LIKE) escala bien para bibliotecas personales.
+    """
+
+    __tablename__ = "media_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    kind: Mapped[str] = mapped_column(String(10), index=True, nullable=False)  # audio|image|video
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    tags: Mapped[str] = mapped_column(String(500), default="", server_default="")  # CSV minúsculas
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)  # nombre original al subir
+    path: Mapped[str] = mapped_column(
+        String(255), unique=True, nullable=False
+    )  # relativo a MEDIA_DIR
+    thumb_path: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )  # relativo a MEDIA_DIR
+    mime: Mapped[str] = mapped_column(String(100), nullable=False)
+    size: Mapped[int] = mapped_column(nullable=False)  # bytes
+    duration_s: Mapped[float | None] = mapped_column(nullable=True)  # audio/video (ffprobe)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
