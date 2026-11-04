@@ -37,6 +37,7 @@ ORDER_COLUMNS = {
     "title": MediaItem.title,
     "size": MediaItem.size,
     "duration": MediaItem.duration_s,
+    "rating": MediaItem.rating,
 }
 
 
@@ -104,8 +105,9 @@ def list_media(
     tag_no: str | None = Query(None, max_length=50, description="NO debe contener este tag"),
     collection: int | None = Query(None, description="Solo de esta colección"),
     scope: str = Query("mine", pattern="^(mine|team)$"),
-    order: str = Query("created", pattern="^(created|title|size|duration)$"),
+    order: str = Query("created", pattern="^(created|title|size|duration|rating)$"),
     direction: str = Query("desc", pattern="^(asc|desc)$"),
+    min_rating: int | None = Query(None, ge=1, le=5, description="Solo con rating >= n"),
     since: datetime | None = None,
     until: datetime | None = None,
     trash: bool = Query(False, description="Solo papelera"),
@@ -152,6 +154,8 @@ def list_media(
         base = base.filter(MediaItem.created_at >= since)
     if until:
         base = base.filter(MediaItem.created_at <= until)
+    if min_rating:
+        base = base.filter(MediaItem.rating >= min_rating)
 
     col = ORDER_COLUMNS[order]
     base = base.order_by(col.desc() if direction == "desc" else col.asc(), MediaItem.id.desc())
@@ -236,9 +240,67 @@ def update_item(
         if data.visibility not in ("private", "team"):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="visibility inválida")
         item.visibility = data.visibility
+    if data.rating is not None:
+        item.rating = int(data.rating)
     db.commit()
     db.refresh(item)
     return schemas.MediaOut.from_item(item)
+
+
+@router.post(
+    "/{item_id}/trim", response_model=schemas.MediaOut, status_code=status.HTTP_201_CREATED
+)
+def trim_media(
+    item_id: int,
+    data: schemas.TrimIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> schemas.MediaOut:
+    """Crea un NUEVO recurso con el fragmento [start → end] del clip.
+
+    ffmpeg `-c copy` corta sin re-codificar (rápido, sin pérdida de calidad).
+    El original queda intacto; el fragmento hereda kind/mime y se genera su
+    propio thumbnail, duración y tags.
+    """
+    item = _owned_item(db, user, item_id)
+    if item.kind not in ("video", "audio"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Solo clips de video o audio")
+    end = data.end if data.end is not None else (item.duration_s or None)
+    if end is not None and end <= data.start:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="end debe ser mayor que start")
+
+    rel = media_svc.trim_segment(
+        item.path,
+        item.kind,
+        data.start,
+        end,
+    )
+    if rel is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ffmpeg no disponible para cortar el fragmento",
+        )
+    size = (media_svc.media_root() / rel).stat().st_size
+    desc = f"Corte de «{item.title}» ({data.start:g}s → {end if end is not None else 'fin'}s)"  # noqa: E501
+    frag = MediaItem(
+        owner_id=user.id,
+        kind=item.kind,
+        title=(data.title or f"{item.title} (corte {data.start:.0f}s–{end or '?'})")[:200],
+        tags=schemas.tags_csv(data.tags or []),
+        description=desc,
+        visibility=item.visibility,
+        filename=Path(item.filename).stem + "_corte" + Path(item.filename).suffix,
+        path=rel,
+        mime=item.mime,
+        size=size,
+    )
+    frag.thumb_path = media_svc.make_thumbnail(rel, frag.kind)
+    if media_svc.ffmpeg_bin():
+        frag.duration_s = media_svc.probe_duration(rel, frag.kind)
+    db.add(frag)
+    db.commit()
+    db.refresh(frag)
+    return schemas.MediaOut.from_item(frag)
 
 
 @router.post("/{item_id}/rethumb", response_model=schemas.MediaOut)

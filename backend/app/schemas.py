@@ -84,6 +84,7 @@ class MediaOut(BaseModel):
     duration_s: float | None
     has_thumb: bool
     visibility: str
+    rating: int
     deleted: bool
     created_at: datetime
 
@@ -103,6 +104,7 @@ class MediaOut(BaseModel):
             duration_s=item.duration_s,
             has_thumb=item.thumb_path is not None,
             visibility=getattr(item, "visibility", "private") or "private",
+            rating=int(getattr(item, "rating", 0) or 0),
             deleted=getattr(item, "deleted_at", None) is not None,
             created_at=item.created_at,
         )
@@ -119,6 +121,14 @@ class MediaUpdate(BaseModel):
     description: str | None = Field(None, max_length=2000)
     meta: dict | None = Field(None, description="Campos libres: {camera, proyecto, ...}")
     visibility: str | None = Field(None, description="private|team")
+    rating: int | None = Field(None, ge=0, le=5, description="Estrellas 0-5")
+
+
+class TrimIn(BaseModel):
+    start: float = Field(..., ge=0, description="Segundo inicial")
+    end: float | None = Field(None, description="Segundo final (None = hasta el final del clip)")
+    title: str | None = Field(None, max_length=200, description="Título del fragmento nuevo")
+    tags: list[str] | None = Field(None, description="Tags del fragmento nuevo")
 
 
 class BulkRequest(BaseModel):

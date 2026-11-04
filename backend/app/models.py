@@ -68,6 +68,7 @@ class MediaItem(Base):
     visibility: Mapped[str] = mapped_column(
         String(10), index=True, default="private", server_default="private"
     )  # private|team
+    rating: Mapped[int] = mapped_column(default=0, server_default=sa.text("0"))  # 0..5 estrellas
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )  # papelera

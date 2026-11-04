@@ -154,6 +154,32 @@ def make_thumbnail(rel_path: str, kind: str) -> str | None:
     return str(Path(rel_path).parent / dst_name.name)
 
 
+def trim_segment(rel_path: str, kind: str, start: float, end: float | None) -> str | None:
+    """Corta [start→end] de un clip con ffmpeg -c copy → NUEVO fichero.
+
+    Devuelve la ruta relativa del fragmento o None si no hay ffmpeg/falló.
+    """
+    ff = ffmpeg_bin()
+    if not ff:
+        return None
+    root = media_root()
+    src = root / rel_path
+    frag_name = f"{Path(rel_path).stem}_corte_{uuid.uuid4().hex[:6]}{Path(rel_path).suffix}"
+    dst_abs = src.parent / frag_name
+    cmd = [ff, "-loglevel", "error", "-ss", f"{start:.3f}"]
+    if end is not None:
+        cmd += ["-to", f"{end:.3f}"]
+    cmd += ["-i", str(src), "-c", "copy", "-y", str(dst_abs)]
+    try:
+        subprocess.run(cmd, timeout=300, check=True, capture_output=True)
+    except Exception:  # noqa: BLE001
+        dst_abs.unlink(missing_ok=True)
+        return None
+    if not dst_abs.exists():
+        return None
+    return str(Path(rel_path).parent / frag_name)
+
+
 def rethumbnail_at(rel_path: str, at_seconds: float) -> str | None:
     """Regenera el thumbnail de un VIDEO tomándolo en `at_seconds`.
 
