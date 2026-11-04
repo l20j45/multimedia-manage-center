@@ -55,7 +55,7 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: (user: User) => 
   }
 
   return (
-    <div className="card">
+    <div className="card auth-card">
       <h1>Biblioteca de Recursos Multimedia</h1>
       <p className="sub">Inicia sesión o crea tu cuenta</p>
 
