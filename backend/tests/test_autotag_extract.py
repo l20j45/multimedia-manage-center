@@ -55,7 +55,7 @@ def test_autotag_no_aplica_solo_sugiere_y_llave_gemini(monkeypatch) -> None:
     assert target["tags"] == before, "LA INTERFAZ NUNCA aplica por su cuenta"
 
     # con llave mockeada: sugerencias combinadas (heurística + gemini fake)
-    monkeypatch.setattr(autotag_svc, "gemini_tags", lambda it: ["copypasta", "risa"])
+    monkeypatch.setattr(autotag_svc, "gemini_tags", lambda it, key: ["copypasta", "risa"])
     monkeypatch.setattr(settings, "GEMINI_API_KEY", "FAKE-KEY")
     res = client.post(f"/media/{item['id']}/autotag", headers=auth(token))
     out = res.json()

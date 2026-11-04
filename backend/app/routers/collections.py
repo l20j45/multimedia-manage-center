@@ -5,9 +5,12 @@ en cascada no está garantizado sin PRAGMA foreign_keys=ON, así que los
 endpoints limpian las filas hijas manualmente.
 """
 
+import zipfile
 from collections import defaultdict
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app import schemas
@@ -15,6 +18,7 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.models import Collection, CollectionItem, MediaItem, User
 from app.routers.media import _owned_item
+from app.services import media as media_svc
 
 router = APIRouter(prefix="/collections", tags=["collections"])
 
@@ -106,6 +110,65 @@ def update_collection(
     db.refresh(col)
     total = db.query(CollectionItem).filter(CollectionItem.collection_id == col.id).count()
     return schemas.CollectionOut.from_col(col, total)
+
+
+@router.get("/{collection_id}/export-zip")
+def export_collection_zip(
+    collection_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """Descarga la colección completa como .zip con los ficheros reales.
+
+    Nombres dentro del zip: NNN_titulo.ext (orden de posición) — sin colisiones
+    y legibles en cualquier NLE. Requiere streaming a un fichero temporal
+    (bibliotecas de cientos de MB no caben en RAM, menos en una Pi).
+    """
+    import tempfile
+
+    col = _owned_collection(db, user, collection_id)
+    items = (
+        db.query(MediaItem)
+        .join(CollectionItem, CollectionItem.media_id == MediaItem.id)
+        .filter(CollectionItem.collection_id == col.id, MediaItem.deleted_at.is_(None))
+        .order_by(CollectionItem.position, CollectionItem.id)
+        .all()
+    )
+    safe_name = "".join(c for c in col.name if c.isalnum() or c in " -_").strip() or "coleccion"
+
+    tmp = tempfile.NamedTemporaryFile(prefix="export_", suffix=".zip", delete=False)
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        for idx, it in enumerate(items, start=1):
+            src = media_svc.media_root() / it.path
+            if not src.exists():
+                continue  # huérfano físico: se omite con pena
+            ext = Path(it.filename).suffix or Path(src).suffix
+            member = f"{idx:03d}_{cols_safe(it.title) or it.id}{ext}"
+            zf.write(src, arcname=member)
+        # lista.csv de acompañamiento
+        lines = ["titulo,tipo,tags,duracion_seg,tamano_mb"]
+        for it in items:
+            fields = [
+                it.title.replace('"', '""'),
+                it.kind,
+                ",".join(schemas.parse_tags(it.tags)).replace('"', '""'),
+                str(it.duration_s or ""),
+                f"{it.size / (1024 * 1024):.2f}",
+            ]
+            lines.append(",".join(f'"{f}"' for f in fields))
+        zf.writestr("_lista.csv", "\n".join(lines) + "\n")
+    tmp.close()
+    size = Path(tmp.name).stat().st_size
+    return FileResponse(
+        tmp.name,
+        media_type="application/zip",
+        filename=f"{safe_name}.zip",
+        headers={"Content-Length": str(size)},
+    )
+
+
+def cols_safe(title: str) -> str:
+    return "".join(c for c in title if c.isalnum() or c in " -_").strip()[:60]
 
 
 @router.get("/{collection_id}/export")

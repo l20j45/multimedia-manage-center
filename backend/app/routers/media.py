@@ -26,7 +26,6 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app import schemas
-from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import Collection, CollectionItem, MediaItem, User
@@ -383,17 +382,19 @@ def autotag(
 ) -> schemas.AutotagOut:
     """SUGIERE tags para un recurso (no aplica nada por sí solo).
 
-    Heurística local siempre; visión con Gemini solo si GEMINI_API_KEY está
-    en backend/.env. La UI muestra los chips y el usuario decide cuáles aplicar.
+    Heurística local siempre; visión con Gemini solo si hay llave (configurada
+    desde la app o el .env). La UI muestra los chips y el usuario decide.
     """
+    from app.routers.settings import get_gemini_api_key
     from app.services import autotag as autotag_svc
 
     item = _owned_item(db, user, item_id)
+    key = get_gemini_api_key(db)
     existing = set(schemas.parse_tags(item.tags))
-    freshly = [t for t in autotag_svc.suggest_tags(item) if t not in existing][:12]
+    freshly = [t for t in autotag_svc.suggest_tags(item, key) if t not in existing][:12]
     return schemas.AutotagOut(
         suggestions=freshly,
-        source="gemini+heuristica" if getattr(settings, "GEMINI_API_KEY", "") else "heuristica",
+        source="gemini+heuristica" if key else "heuristica",
     )
 
 
@@ -657,6 +658,82 @@ def _item_for_read(
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Recurso no encontrado")
     return item
+
+
+@router.get("/stats/overview")
+def stats_overview(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> schemas.StatOut:
+    """Panel simple: recursos por tipo (cuenta+peso), top tags y/uploads por mes."""
+    from collections import Counter
+
+    rows = (
+        db.query(
+            MediaItem.kind,
+            func.count(MediaItem.id),
+            func.sum(MediaItem.size),
+        )
+        .filter(MediaItem.owner_id == user.id, MediaItem.deleted_at.is_(None))
+        .group_by(MediaItem.kind)
+        .all()
+    )
+    by_kind = {kind: {"count": int(c), "size": int(s or 0)} for kind, c, s in rows}
+    for k in ("audio", "image", "video"):
+        by_kind.setdefault(k, {"count": 0, "size": 0})
+
+    tag_counts: Counter[str] = Counter()
+    for (csv_tags,) in (
+        db.query(MediaItem.tags)
+        .filter(MediaItem.owner_id == user.id, MediaItem.deleted_at.is_(None))
+        .all()
+    ):
+        for t in schemas.parse_tags(csv_tags):
+            tag_counts[t] += 1
+
+    monthly = Counter()
+    for (created,) in (
+        db.query(MediaItem.created_at)
+        .filter(MediaItem.owner_id == user.id, MediaItem.deleted_at.is_(None))
+        .all()
+    ):
+        if created:
+            monthly[created.strftime("%Y-%m")] += 1
+    months = [{"month": m, "count": monthly[m]} for m in sorted(monthly)[-6:]]
+
+    trash_count = (
+        db.query(func.count(MediaItem.id))
+        .filter(MediaItem.owner_id == user.id, MediaItem.deleted_at.is_not(None))
+        .scalar()
+    )
+    return schemas.StatOut(
+        by_kind=by_kind,
+        top_tags=[{"tag": t, "count": c} for t, c in tag_counts.most_common(12)],
+        months=months,
+        total_size=sum(v["size"] for v in by_kind.values()),
+        trash_count=int(trash_count or 0),
+    )
+
+
+@router.get("/by-hash/{sha}", response_model=schemas.MediaOut)
+def by_hash(
+    sha: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> schemas.MediaOut:
+    """Busca un recurso propio por sha256 del contenido (anti-dup al pegar)."""
+    from app.models import MediaItem  # noqa: F811 (claridad del route order)
+
+    item = (
+        db.query(MediaItem)
+        .filter(
+            MediaItem.sha256 == sha, MediaItem.owner_id == user.id, MediaItem.deleted_at.is_(None)
+        )
+        .first()
+    )
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No existe ese contenido")
+    return schemas.MediaOut.from_item(item)
 
 
 @router.get("/stats/count")

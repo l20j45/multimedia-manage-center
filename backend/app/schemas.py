@@ -174,6 +174,14 @@ class PublicCollectionOut(BaseModel):
     items: list[MediaOut]
 
 
+class StatOut(BaseModel):
+    by_kind: dict[str, dict[str, int]]
+    top_tags: list[TagCount]
+    months: list[dict]
+    total_size: int
+    trash_count: int
+
+
 class DuplicateGroups(BaseModel):
     groups: list[list[MediaOut]]
 

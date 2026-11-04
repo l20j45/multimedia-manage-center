@@ -103,3 +103,13 @@ class CollectionItem(Base):
     )
     media_id: Mapped[int] = mapped_column(ForeignKey("media_items.id"), index=True, nullable=False)
     position: Mapped[int] = mapped_column(nullable=False, default=0)
+
+
+class AppSetting(Base):
+    """KV editable desde la app (ej. GEMINI_API_KEY sin tocar .env)."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(60), primary_key=True)
+    value: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -125,11 +125,11 @@ def _probe_dimensions(item: MediaItem) -> tuple[int, int] | None:
     return None
 
 
-def gemini_tags(item: MediaItem) -> list[str] | None:
-    """Tags via Gemini vision (solo si GEMINI_API_KEY). None sin llave/error."""
+def gemini_tags(item: MediaItem, api_key: str | None = None) -> list[str] | None:
+    """Tags via Gemini vision (solo si hay llave). None sin llave/error."""
     import base64
 
-    key = getattr(settings, "GEMINI_API_KEY", "") or ""
+    key = api_key or getattr(settings, "GEMINI_API_KEY", "") or ""
     if not key:
         return None
     src = media_root() / (item.thumb_path or item.path)
@@ -210,10 +210,10 @@ def _compact_copy(item: MediaItem) -> Path | None:
         return None
 
 
-def suggest_tags(item: MediaItem) -> list[str]:
-    """Union de heurística + visual (visual solo si la llave está)."""
+def suggest_tags(item: MediaItem, api_key: str | None = None) -> list[str]:
+    """Union de heurística + visual (visual solo si hay llave)."""
     base = heuristic_tags(item)
-    gemini = gemini_tags(item)
+    gemini = gemini_tags(item, api_key)
     if gemini:
         seen: dict[str, None] = {}
         for t in [*base, *gemini]:
