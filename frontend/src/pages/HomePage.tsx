@@ -8,7 +8,11 @@ import {
   revokeShare,
   deleteMedia,
   exportUrl,
+  exportZipUrl,
+  fetchStats,
+  findByHash,
   getAutotagSuggestions,
+  getGeminiKeyStatus,
   listCollections,
   listDuplicates,
   listMedia,
@@ -17,6 +21,8 @@ import {
   purgeMedia,
   removeCollectionItem,
   restoreMedia,
+  setGeminiKey,
+  sha256OfFile,
   shareLink,
   updateMe,
   updateMedia,
@@ -25,11 +31,12 @@ import {
   type MediaItem,
   type MediaKind,
   type MediaQuery,
+  type StatOut,
   type User,
 } from "../lib/api";
 import DetailPanel from "./DetailPanel";
 
-type NavKey = "all" | MediaKind | "trash" | "collections";
+type NavKey = "all" | MediaKind | "trash" | "collections" | "stats";
 
 const NAV_MAIN: { key: NavKey; label: string; icon: string }[] = [
   { key: "all", label: "Todos", icon: "🗂" },
@@ -37,6 +44,7 @@ const NAV_MAIN: { key: NavKey; label: string; icon: string }[] = [
   { key: "image", label: "Imágenes", icon: "🖼" },
   { key: "video", label: "Vídeos", icon: "🎬" },
   { key: "collections", label: "Colecciones", icon: "📚" },
+  { key: "stats", label: "Stats", icon: "📊" },
   { key: "trash", label: "Papelera", icon: "🗑" },
 ];
 
@@ -145,6 +153,14 @@ export default function HomePage({
   const [busy, setBusy] = useState(false);
   const [profileError, setProfileError] = useState("");
 
+  // Llave IA (configuración desde la app)
+  const [geminiKey, setGeminiKeyValue] = useState("");
+  const [geminiStatus, setGeminiStatus] = useState<{ set: boolean; tail: string; source: string } | null>(null);
+  const [geminiBusy, setGeminiBusy] = useState(false);
+
+  // Stats
+  const [stats, setStats] = useState<StatOut | null>(null);
+
   const fileInput = useRef<HTMLInputElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
 
@@ -211,6 +227,32 @@ export default function HomePage({
     loadTags();
     loadCollections();
   }, [loadTags, loadCollections]);
+
+  // stats y estado de llave: al abrir Perfil o la vista Stats
+  useEffect(() => {
+    if (nav === "stats" && !stats) {
+      fetchStats().then(setStats).catch(() => setStats(null));
+    }
+  }, [nav, stats]);
+
+  useEffect(() => {
+    if (profileOpen && !geminiStatus) {
+      getGeminiKeyStatus().then(setGeminiStatus).catch(() => setGeminiStatus(null));
+    }
+    if (!profileOpen) setGeminiKeyValue("");
+  }, [profileOpen, geminiStatus]);
+
+  async function saveGeminiKey() {
+    setGeminiBusy(true);
+    try {
+      setGeminiStatus(await setGeminiKey(geminiKey));
+      setGeminiKeyValue("");
+    } catch {
+      /* la UI muestra el error dentro del estado si falla: aquí silencio */
+    } finally {
+      setGeminiBusy(false);
+    }
+  }
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(query.trim()), 300);
@@ -390,6 +432,16 @@ export default function HomePage({
   async function doQuickUpload(f: File) {
     setBulkMsg("");
     try {
+      // anti-dup: si el contenido ya existe lo abrimos en vez de duplicar
+      const sha = await sha256OfFile(f);
+      if (sha) {
+        const dup = await findByHash(sha);
+        if (dup) {
+          setBulkMsg(`📋 ya lo tenías: «${dup.title}» — abre el detalle (no duplicado)`);
+          setDetail(dup);
+          return;
+        }
+      }
       const up = await uploadMedia(f, f.name.replace(/\.[^.]+$/, ""), "", undefined, { visibility });
       setBulkMsg(`📋 pegado y subido: ${f.name}`);
       await Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
@@ -916,7 +968,55 @@ export default function HomePage({
         )}
 
         {/* ---- contenido principal ---- */}
-        {nav === "collections" ? (
+        {nav === "stats" ? (
+          <div className="stats-page">
+            <h2>📊 Estadísticas de tu biblioteca</h2>
+            {!stats && <p className="loading">Cargando…</p>}
+            {stats && (
+              <>
+                <div className="stats-cards">
+                  {(["image", "video", "audio"] as MediaKind[]).map((k) => (
+                    <div className="stat-card" key={k}>
+                      <p className="stat-icon">{KIND_ICON[k]}</p>
+                      <strong>{stats.by_kind[k]?.count ?? 0}</strong>
+                      <span className="media-meta">
+                        {fmtSize(stats.by_kind[k]?.size ?? 0)}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="stat-card">
+                    <p className="stat-icon">🗑</p>
+                    <strong>{stats.trash_count}</strong>
+                    <span className="media-meta">papelera</span>
+                  </div>
+                </div>
+                <p className="sub total-line">Peso total: {fmtSize(stats.total_size)}</p>
+                <p className="snav-label">Tags más usados</p>
+                <div className="tag-chips">
+                  {stats.top_tags.map((t) => (
+                    <span key={t.tag} className="chip static">{t.tag} <b>{t.count}</b></span>
+                  ))}
+                  {stats.top_tags.length === 0 && <span className="muted">sin tags todavía</span>}
+                </div>
+                <p className="snav-label">Subidas por mes</p>
+                <div className="months-bars">
+                  {stats.months.map((m) => {
+                    const max = Math.max(...stats.months.map((x) => x.count), 1);
+                    return (
+                      <div className="month-col" key={m.month}>
+                        <div className="bar" style={{ height: `${(m.count / max) * 100}%` }} title={`${m.count} subida(s)`}>
+                          <span>{m.count}</span>
+                        </div>
+                        <p className="media-meta">{m.month.slice(5)}</p>
+                      </div>
+                    );
+                  })}
+                  {stats.months.length === 0 && <span className="muted">sin actividad</span>}
+                </div>
+              </>
+            )}
+          </div>
+        ) : nav === "collections" ? (
           <div className="collections-page">
             <h2>Colecciones y ediciones</h2>
             <p className="sub">📚 colección = agrupación · 🎬 proyecto de edición (exportable a .txt/.csv)</p>
@@ -931,6 +1031,7 @@ export default function HomePage({
                   <span className="spacer" />
                   <a className="chip" href={exportUrl(c.id, "txt")} download title="Exportar .txt">⬇ txt</a>
                   <a className="chip" href={exportUrl(c.id, "csv")} download title="Exportar .csv">⬇ csv</a>
+                  <a className="chip" href={exportZipUrl(c.id)} download title="Descargar ZIP con los ficheros">📦 zip</a>
                   <button
                     className="chip"
                     onClick={() => createShareLink(c)}
@@ -1125,6 +1226,47 @@ export default function HomePage({
                 </button>
               </div>
             </form>
+
+            <div className="detail-section gemini-section">
+              <p className="snav-label">🤖 Auto-tag con IA — llave de Gemini</p>
+              {geminiStatus?.set ? (
+                <p className="sub">
+                  Configurada {geminiStatus.source === "app" ? "desde la app" : "en .env"} ({geminiStatus.tail})
+                </p>
+              ) : (
+                <p className="sub">Sin llave: se usa la heurística local (tags por tamaño/orientación/nombre).</p>
+              )}
+              <input
+                type="password"
+                placeholder="Pega tu GEMINI_API_KEY (AIza...)"
+                value={geminiKey}
+                onChange={(e) => setGeminiKeyValue(e.target.value)}
+                aria-label="Llave de Gemini"
+              />
+              <div className="row">
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={geminiBusy}
+                  onClick={() => saveGeminiKey()}
+                  title="Vacío = borra la llave"
+                >
+                  {geminiBusy ? "Guardando…" : "Guardar llave"}
+                </button>
+                {geminiStatus?.set && geminiStatus.source === "app" && (
+                  <button
+                    type="button"
+                    className="ghost danger"
+                    onClick={() => setGeminiKey("").then(setGeminiStatus).catch(() => {})}
+                  >
+                    Quitar
+                  </button>
+                )}
+              </div>
+              <p className="sub tiny-note">
+                Se guarda en la BD del proyecto (viaja con tu backup), nunca en .env ni en el repo.
+              </p>
+            </div>
           </main>
         </div>
       )}

@@ -337,6 +337,48 @@ export function collectionItems(id: number): Promise<MediaItem[]> {
   return request(`/collections/${id}/items`);
 }
 
+/** URL para descargar la colección completa como .zip (ficheros reales). */
+export function exportZipUrl(id: number): string {
+  const token = getToken() ?? "";
+  return `${API_BASE}/collections/${id}/export-zip?access_token=${encodeURIComponent(token)}`;
+}
+
+export interface StatOut {
+  by_kind: Record<string, { count: number; size: number }>;
+  top_tags: { tag: string; count: number }[];
+  months: { month: string; count: number }[];
+  total_size: number;
+  trash_count: number;
+}
+
+export function fetchStats(): Promise<StatOut> {
+  return request("/media/stats/overview");
+}
+
+// ---------------------------------------------------------------- llave IA
+export function getGeminiKeyStatus(): Promise<{ set: boolean; tail: string; source: string }> {
+  return request("/settings/gemini-key");
+}
+
+export function setGeminiKey(value: string): Promise<{ set: boolean; tail: string; source: string }> {
+  return request("/settings/gemini-key", { method: "PUT", body: JSON.stringify({ value }) });
+}
+
+/** Busca un recurso propio por sha256 del contenido (anti-dup al pegar). */
+export async function findByHash(sha256: string): Promise<MediaItem | null> {
+  try {
+    return await request(`/media/by-hash/${sha256}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function sha256OfFile(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export function addCollectionItem(id: number, mediaId: number): Promise<Collection> {
   return request(`/collections/${id}/items`, {
     method: "POST",
