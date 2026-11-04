@@ -134,11 +134,19 @@ class TrimIn(BaseModel):
 class BulkRequest(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=200)
     action: Literal[
-        "add_tag", "remove_tag", "set_visibility", "delete", "restore", "purge", "add_to_collection"
+        "add_tag",
+        "remove_tag",
+        "set_visibility",
+        "delete",
+        "restore",
+        "purge",
+        "add_to_collection",
+        "rename",
     ]
     tags: list[str] | None = None
     visibility: str | None = None
     collection_id: int | None = None
+    pattern: str | None = Field(None, max_length=180, description="Patrón: {n}, {date}, {title}")
 
 
 class BulkResult(BaseModel):
@@ -153,6 +161,17 @@ class RethumbIn(BaseModel):
 class AutotagOut(BaseModel):
     suggestions: list[str]
     source: str
+
+
+class ShareOut(BaseModel):
+    token: str
+    url: str  # ruta relativa /share/<token> (la UI añade el origen)
+
+
+class PublicCollectionOut(BaseModel):
+    name: str
+    is_project: bool
+    items: list[MediaOut]
 
 
 class DuplicateGroups(BaseModel):

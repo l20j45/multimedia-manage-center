@@ -173,6 +173,35 @@ def delete_collection(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post("/{collection_id}/share", response_model=schemas.ShareOut)
+def create_share(
+    collection_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> schemas.ShareOut:
+    """Genera/rota el token de enlace público de la colección."""
+    import secrets
+
+    col = _owned_collection(db, user, collection_id)
+    if not col.share_token:
+        col.share_token = secrets.token_urlsafe(24)
+        db.commit()
+    return schemas.ShareOut(token=col.share_token, url=f"/share/{col.share_token}")
+
+
+@router.delete("/{collection_id}/share", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_share(
+    collection_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Revoca el enlace público (el token deja de servir)."""
+    col = _owned_collection(db, user, collection_id)
+    col.share_token = None
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/{collection_id}/items", response_model=list[schemas.MediaOut])
 def collection_items(
     collection_id: int,

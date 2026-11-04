@@ -16,6 +16,7 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
+    Request,
     Response,
     UploadFile,
     status,
@@ -27,8 +28,8 @@ from sqlalchemy.orm import Session
 from app import schemas
 from app.config import settings
 from app.database import get_db
-from app.deps import get_current_user, get_current_user_flexible
-from app.models import CollectionItem, MediaItem, User
+from app.deps import get_current_user
+from app.models import Collection, CollectionItem, MediaItem, User
 from app.services import media as media_svc
 
 router = APIRouter(prefix="/media", tags=["media"])
@@ -185,6 +186,33 @@ def list_tags(
         for tag in schemas.parse_tags(csv_tags):
             counts[tag] = counts.get(tag, 0) + 1
     return [schemas.TagCount(tag=t, count=c) for t, c in sorted(counts.items())]
+
+
+@router.get("/public/{token}", response_model=schemas.PublicCollectionOut)
+def public_collection(
+    token: str,
+    db: Session = Depends(get_db),
+) -> schemas.PublicCollectionOut:
+    """Enlace público SIN login: datos de la colección compartida (solo lectura).
+
+    Los ficheros se sirven por GET /media/{id}/file?share=<token> — el
+    endpoint valida que el recurso pertenezca a ESA colección.
+    """
+    col = db.query(Collection).filter(Collection.share_token == token).first()
+    if col is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Enlace no válido")
+    items = (
+        db.query(MediaItem)
+        .join(CollectionItem, CollectionItem.media_id == MediaItem.id)
+        .filter(CollectionItem.collection_id == col.id, MediaItem.deleted_at.is_(None))
+        .order_by(CollectionItem.position, CollectionItem.id)
+        .all()
+    )
+    return schemas.PublicCollectionOut(
+        name=col.name,
+        is_project=bool(col.is_project),
+        items=[schemas.MediaOut.from_item(i) for i in items],
+    )
 
 
 @router.get("/duplicates", response_model=schemas.DuplicateGroups)
@@ -438,12 +466,18 @@ def bulk(
 ) -> schemas.BulkResult:
     """Operaciones en lote sobre varios recursos propios."""
     include_deleted = data.action in ("restore", "purge")
-    q = db.query(MediaItem).filter(MediaItem.id.in_(data.ids), MediaItem.owner_id == user.id)
+    q = db.query(MediaItem).filter(
+        MediaItem.id.in_(data.ids),
+        MediaItem.owner_id == user.id,
+    )
     if not include_deleted:
         q = q.filter(MediaItem.deleted_at.is_(None))
+    if data.action == "rename":
+        q = q.order_by(MediaItem.created_at.asc(), MediaItem.id.asc())
     items = q.all()
     action = data.action
     done = 0
+    counter = 0
     for item in items:
         match action:
             case "add_tag" | "remove_tag":
@@ -483,6 +517,18 @@ def bulk(
                                 position=0,
                             )
                         )
+            case "rename":
+                from datetime import date as _date
+
+                pattern = data.pattern or "{title}"
+                counter += 1
+                new_title = (
+                    pattern.replace("{n}", f"{counter:03d}")
+                    .replace("{date}", _date.today().isoformat())
+                    .replace("{title}", item.title)
+                    .strip()
+                )[:200] or item.title
+                item.title = new_title
             case _:
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="action inválido")
         done += 1
@@ -493,11 +539,13 @@ def bulk(
 @router.get("/{item_id}/file")
 def get_file(
     item_id: int,
-    user: User = Depends(get_current_user_flexible),
+    request: Request,
+    share: str | None = Query(None),
     db: Session = Depends(get_db),
 ) -> FileResponse:
-    """Sirve el fichero original (auth por header o ?access_token= para la UI)."""
-    item = _item_for_read(db, user, item_id)
+    """Sirve el fichero original: owner/equipo (header o ?access_token=) o
+    lectura pública de colección compartida con ?share=<token>."""
+    item = _resolve_readable(request, db, item_id, share)
     abs_path = media_svc.media_root() / item.path
     if not abs_path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Fichero no está en disco")
@@ -507,17 +555,87 @@ def get_file(
 @router.get("/{item_id}/thumb")
 def get_thumb(
     item_id: int,
-    user: User = Depends(get_current_user_flexible),
+    request: Request,
+    share: str | None = Query(None),
     db: Session = Depends(get_db),
 ) -> FileResponse:
-    """Thumbnail JPEG (auth por header o ?access_token=)."""
-    item = _item_for_read(db, user, item_id)
+    """Thumbnail JPEG (owner/equipo o público por share token)."""
+    item = _resolve_readable(request, db, item_id, share)
     if not item.thumb_path:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Sin thumbnail")
     abs_path = media_svc.media_root() / item.thumb_path
     if not abs_path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Thumbnail no está en disco")
     return FileResponse(abs_path, media_type="image/jpeg")
+
+
+def _resolve_readable(
+    request: Request, db: Session, item_id: int, share: str | None, include_deleted: bool = False
+) -> MediaItem:
+    """Acceso de lectura: Bearer/access_token (owner o team) o token de
+    colección compartida (el recurso debe pertenecer a ESA colección)."""
+    from app.security import decode_access_token
+
+    # 1) token de usuario (header o query)
+    auth = request.headers.get("Authorization")
+    token = None
+    if auth and auth.lower().startswith("bearer "):
+        token = auth[7:]
+    if not token:
+        token = request.query_params.get("access_token")
+    if token:
+        subject = decode_access_token(token)
+        if subject:
+            user = db.query(User).filter(User.email == subject).first()
+            if user and user.is_active:
+                q = db.query(MediaItem).filter(
+                    MediaItem.id == item_id, MediaItem.owner_id == user.id
+                )
+                item = (
+                    q.first()
+                    if include_deleted
+                    else q.filter(MediaItem.deleted_at.is_(None)).first()
+                )
+                if item is not None:
+                    return item
+                team_item = (
+                    db.query(MediaItem)
+                    .filter(
+                        MediaItem.id == item_id,
+                        MediaItem.visibility == "team",
+                        MediaItem.deleted_at.is_(None),
+                    )
+                    .first()
+                )
+                if team_item is not None:
+                    return team_item
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas")
+
+    # 2) enlace compartido
+    if share:
+        col = db.query(Collection).filter(Collection.share_token == share).first()
+        if col is not None:
+            belongs = (
+                db.query(CollectionItem)
+                .filter(
+                    CollectionItem.collection_id == col.id,
+                    CollectionItem.media_id == item_id,
+                )
+                .first()
+            )
+            if belongs is not None:
+                item = (
+                    db.query(MediaItem)
+                    .filter(MediaItem.id == item_id, MediaItem.deleted_at.is_(None))
+                    .first()
+                )
+                if item is not None:
+                    return item
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Enlace compartido no válido")
+
+    raise HTTPException(
+        status.HTTP_401_UNAUTHORIZED, detail="Se requiere token o enlace compartido"
+    )
 
 
 def _item_for_read(

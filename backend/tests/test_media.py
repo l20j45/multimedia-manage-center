@@ -146,7 +146,7 @@ def test_fichero_y_thumb_con_token_query_borrado() -> None:
     # otro usuario NO ve el recurso (privado por usuario)
     other = register_and_login("otro")
     res = client.get(f"/media/{item['id']}/file", headers=auth(other))
-    assert res.status_code == 404
+    assert res.status_code == 401, "ajeno sin acceso al recurso privado"
     res = client.get("/media", params={"q": "icono"}, headers=auth(other))
     assert res.json()["total"] == 0
 

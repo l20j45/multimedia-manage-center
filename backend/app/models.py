@@ -85,6 +85,9 @@ class Collection(Base):
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     is_project: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa.text("0"))
+    share_token: Mapped[str | None] = mapped_column(
+        String(43), unique=True, index=True, nullable=True
+    )  # link público revocable (/share/<token>)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
