@@ -14,6 +14,17 @@ Proyecto generado con el scaffolding **FastAPI + Tauri** (Windows / macOS / Linu
   - Tests de UI con **vitest** (`pnpm test`)
 - **CI**: GitHub Actions (`.github/workflows/ci.yml`) — backend, frontend e imagen Docker en cada PR/push; compilados nativos multiplataforma (Windows/macOS/Linux + instaladores como artifacts) solo con un tag `v*` o ejecución manual por `Actions → Run workflow`
 - **Docker**: `docker-compose.yml` para desplegar la API (FastAPI + SQLite) con un ejecutable persistente
+
+## Backup de tus datos
+
+`backend/uploads/` y `backend/app.db` NO viven en git (son tus ficheros). Respáldalos con:
+
+```bash
+powershell -File scripts/backup.ps1            # Windows
+bash scripts/backup.sh /ruta/destino           # macOS/Linux
+```
+
+Se crea `backups/biblioteca-backup-<fecha>.zip` (stageo primero → compatible con la BD abierta del server). El script imprime el comando sugerido para programarlo a diario con `schtasks`/cron.
 - **Git**: repositorio inicializado con el primer commit
 - **Graphify**: listo para mapear el proyecto (ver más abajo)
 - **Licencia**: MIT (`LICENSE`) — cámbiala si tu proyecto lo requiere

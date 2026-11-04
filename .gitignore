@@ -24,6 +24,8 @@ dist/
 
 # --- Biblioteca de mensajes (ficheros de usuarios, fuera del repo) ---
 backend/uploads/
+# --- Backups del usuario (contienen app.db + uploads pero son suyos) ---
+backups/
 
 # --- IDE / OS ---
 .idea/
