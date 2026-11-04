@@ -374,6 +374,63 @@ body::before {
 .gemini-section input { margin-bottom: 0.4rem; }
 .tiny-note { font-size: 0.7rem; margin-top: 0.3rem; color: #5c6570; }
 
+/* ==================== TOASTS / AYUDA / HINTS ==================== */
+.toast-stack {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 100;
+  pointer-events: none;
+}
+.toast {
+  background: var(--surface-2);
+  border: 1px solid #6a551c;
+  border-left: 4px solid var(--accent);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 0.6rem 1rem;
+  font-size: 0.88rem;
+  box-shadow: 0 12px 40px #000000a0;
+  animation: toastIn .18s ease-out;
+  max-width: 380px;
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+.help-card { width: min(400px, 94vw); }
+.help-list { margin: 0.6rem 0 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.help-list > div {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  font-size: 0.9rem;
+}
+.help-list dt {
+  font-family: var(--mono);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.15rem 0.5rem;
+  min-width: 4.2em;
+  text-align: center;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.detail-hint {
+  color: #5c6570;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  margin: 0;
+  text-align: right;
+}
+
 /* login: tarjeta centrada y compacta */
 /* login: tarjeta centrada y compacta (full-bleed no aplica ahí) */
 .card.auth-card { width: min(420px, 94vw); margin: 8vh auto; }

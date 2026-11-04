@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addCollectionItem,
   bulkMedia,
@@ -109,7 +109,13 @@ export default function HomePage({
 
   // Drag & drop
   const [dragging, setDragging] = useState(false);
-  const [bulkMsg, setBulkMsg] = useState("");
+  const [toasts, setToasts] = useState<{ id: number; msg: string }[]>([]);
+
+  function toast(msg: string): void {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, msg }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4500);
+  }
 
   // Auto-tag sugerencias (nunca se aplican solas)
   const [suggestions, setSuggestions] = useState<{
@@ -146,6 +152,7 @@ export default function HomePage({
   const [dupesOpen, setDupesOpen] = useState(false);
   const [dupes, setDupes] = useState<MediaItem[][]>([]);
   const [shareLinkFor, setShareLinkFor] = useState<{ name: string; link: string } | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // Perfil
   const [profileOpen, setProfileOpen] = useState(false);
@@ -414,7 +421,7 @@ export default function HomePage({
       setUploadOpen(true);
       return;
     }
-    setBulkMsg("");
+    
     let done = 0;
     let failed = 0;
     for (const f of files) {
@@ -425,25 +432,25 @@ export default function HomePage({
         failed += 1;
       }
     }
-    setBulkMsg(failed === 0 ? `${done} archivo(s) subidos.` : `${done} subidos · ${failed} fallidos.`);
+    toast(failed === 0 ? `${done} archivo(s) subidos` : `${done} subidos · ${failed} fallidos`);
     await Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
   }
 
   async function doQuickUpload(f: File) {
-    setBulkMsg("");
+    
     try {
       // anti-dup: si el contenido ya existe lo abrimos en vez de duplicar
       const sha = await sha256OfFile(f);
       if (sha) {
         const dup = await findByHash(sha);
         if (dup) {
-          setBulkMsg(`📋 ya lo tenías: «${dup.title}» — abre el detalle (no duplicado)`);
+          toast(`📋 ya lo tenías: «${dup.title}» — abre el detalle (no duplicado)`);
           setDetail(dup);
           return;
         }
       }
       const up = await uploadMedia(f, f.name.replace(/\.[^.]+$/, ""), "", undefined, { visibility });
-      setBulkMsg(`📋 pegado y subido: ${f.name}`);
+      toast(`📋 pegado y subido: ${f.name}`);
       await Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
       getAutotagSuggestions(up.id)
         .then((r) => {
@@ -459,7 +466,7 @@ export default function HomePage({
         })
         .catch(() => {});
     } catch (err) {
-      setBulkMsg(err instanceof Error ? err.message : "Error al pegar");
+      toast(err instanceof Error ? `⚠ ${err.message}` : "⚠ Error al pegar");
     }
   }
 
@@ -507,7 +514,7 @@ export default function HomePage({
       | "rename",
   ) {
     setBulkBusy(true);
-    setBulkMsg("");
+    
     try {
       const extra: Record<string, unknown> = {};
       if (action === "add_tag" || action === "remove_tag") {
@@ -521,12 +528,12 @@ export default function HomePage({
         extra.pattern = renamePattern.trim();
       }
       const res = await bulkMedia([...selectedIds], action, extra);
-      setBulkMsg(`${res.done} procesado(s).`);
+      toast(`✔ ${res.done} procesado(s).`);
       setSelectedIds(new Set());
       setBulkTagsText("");
       await Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
     } catch (err) {
-      setBulkMsg(err instanceof Error ? err.message : "Error en la operación en lote");
+      toast(err instanceof Error ? `⚠ ${err.message}` : "⚠ Error en la operación en lote");
     } finally {
       setBulkBusy(false);
     }
@@ -561,7 +568,7 @@ export default function HomePage({
     setColError("");
     try {
       await revokeShare(col.id);
-      setBulkMsg(`Enlace de "${col.name}" revocado.`);
+      toast(`🚫 enlace de "${col.name}" revocado`);
     } catch (err) {
       setColError(err instanceof Error ? err.message : "Error al revocar el enlace");
     }
@@ -628,13 +635,18 @@ export default function HomePage({
         if (e.key === "Escape") target.blur();
         return;
       }
+      if (e.key === "?") {
+        setHelpOpen(true);
+        return;
+      }
       if (e.key === "/") {
         e.preventDefault();
         searchInput.current?.focus();
         return;
       }
       if (e.key === "Escape") {
-        if (addItemFor) setAddItemFor(null);
+        if (helpOpen) setHelpOpen(false);
+        else if (addItemFor) setAddItemFor(null);
         else if (editing) setEditing(null);
         else if (profileOpen) setProfileOpen(false);
         else if (uploadOpen) setUploadOpen(false);
@@ -646,7 +658,7 @@ export default function HomePage({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail, addItemFor, editing, profileOpen, uploadOpen, dupesOpen, selectedIds]);
+  }, [detail, addItemFor, editing, profileOpen, uploadOpen, dupesOpen, selectedIds, helpOpen]);
 
   /* puntapapel: Ctrl+V pegar directamente */
   useEffect(() => {
@@ -777,6 +789,9 @@ export default function HomePage({
         </div>
 
         <div className="snav-bottom">
+          <button className="snav-item" onClick={() => setHelpOpen(true)}>
+            ⌨️ Atajos
+          </button>
           <button className="snav-item" onClick={openDuplicates}>
             👯 Duplicados
           </button>
@@ -888,7 +903,6 @@ export default function HomePage({
                       {c.tag} <span className="chip-count">{c.count}</span>
                     </button>
                   ))}
-                {bulkMsg && <span className="ok">{bulkMsg}</span>}
                 {colError && <span className="error">{colError}</span>}
               </div>
             )}
@@ -1081,7 +1095,7 @@ export default function HomePage({
                   <input readOnly value={shareLinkFor.link} aria-label="Enlace compartido" onClick={(e) => (e.target as HTMLInputElement).select()} />
                   <button
                     className="primary"
-                    onClick={() => void navigator.clipboard?.writeText(shareLinkFor.link).then(() => setBulkMsg("Enlace copiado al portapapeles."))}
+                    onClick={() => void navigator.clipboard?.writeText(shareLinkFor.link).then(() => toast("🔗 enlace copiado"))}
                   >
                     Copiar
                   </button>
@@ -1184,18 +1198,49 @@ export default function HomePage({
       </main>
 
       {/* ==================== OVERLAYS ==================== */}
+      <div className="toast-stack" aria-live="polite">
+        {toasts.map((t) => (
+          <div className="toast" key={t.id}>
+            {t.msg}
+          </div>
+        ))}
+      </div>
+
+      {helpOpen && (
+        <div className="overlay" onClick={() => setHelpOpen(false)}>
+          <div className="card help-card" onClick={(e) => e.stopPropagation()}>
+            <h2>⌨️ Atajos</h2>
+            <dl className="help-list">
+              <div><dt>/</dt><dd>Buscar</dd></div>
+              <div><dt>Ctrl+V</dt><dd>Subir lo que tengas copiado (sin duplicar)</dd></div>
+              <div><dt>I / O</dt><dd>Marcar In / Out del clip (en el detalle)</dd></div>
+              <div><dt>← →</dt><dd>Recurso anterior / siguiente</dd></div>
+              <div><dt>Esc</dt><dd>Cerrar lo que esté abierto</dd></div>
+            </dl>
+            <div className="row">
+              <button className="ghost" onClick={() => setHelpOpen(false)}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
       {detail && (
         <DetailPanel
           item={items.find((i) => i.id === detail.id) ?? detail}
           onClose={() => setDetail(null)}
           onChanged={(upd) => setItems((prev) => prev.map((i) => (i.id === upd.id ? upd : i)))}
           onAddToCollectionPicker={(it) => setAddItemFor(it)}
+          onNavigate={(dir: 1 | -1) => {
+            if (!detail) return;
+            const idx = items.findIndex((i) => i.id === detail.id);
+            const next = items[idx + dir];
+            if (next) setDetail(next);
+          }}
           onTrimCreated={(frag: MediaItem) => {
-            setBulkMsg(`✂ fragmento creado: ${frag.title}`);
+            toast(`✂ fragmento creado: ${frag.title}`);
             Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
           }}
           onCreated={(frag: MediaItem) => {
-            setBulkMsg(`🎧 audio extraído: ${frag.title} — ábrelo y recorta tu SFX con I/O`);
+            toast(`🎧 audio extraído: ${frag.title} — ábrelo y recorta tu SFX con I/O`);
             Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
           }}
         />
@@ -1426,7 +1471,7 @@ export default function HomePage({
 
 function Thumb({ item, className }: { item: MediaItem; className?: string }) {
   return item.has_thumb ? (
-    <img src={mediaUrl(item.id, "thumb")} alt={item.title} className={className} />
+    <img src={mediaUrl(item.id, "thumb")} alt={item.title} className={className} loading="lazy" decoding="async" />
   ) : (
     <span className="media-icon" role="img">
       {KIND_ICON[item.kind]}

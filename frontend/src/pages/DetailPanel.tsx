@@ -42,6 +42,7 @@ export default function DetailPanel({
   onAddToCollectionPicker,
   onTrimCreated,
   onCreated,
+  onNavigate,
 }: {
   item: MediaItem;
   onClose: () => void;
@@ -49,6 +50,7 @@ export default function DetailPanel({
   onAddToCollectionPicker: (item: MediaItem) => void;
   onTrimCreated: (frag: MediaItem) => void;
   onCreated?: (item: MediaItem) => void;
+  onNavigate?: (dir: 1 | -1) => void;
 }) {
   const [extracting, setExtracting] = useState(false);
   const [cur, setCur] = useState(item);
@@ -69,17 +71,19 @@ export default function DetailPanel({
     setNotes(item.description ?? "");
   }, [item]);
 
-  // teclas I/O para marcar In/Out mientras el detalle está abierto
+  // teclas I/O para marcar In/Out y ←/→ para navegar mientras esté abierto
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement;
       if (["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)) return;
       if (e.key === "I") setTrimIn(videoRef.current?.currentTime ?? 0);
       if (e.key === "O") setTrimOut(videoRef.current?.currentTime ?? 0);
+      if (e.key === "ArrowRight") onNavigate?.(1);
+      if (e.key === "ArrowLeft") onNavigate?.(-1);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [onNavigate]);
 
   async function cutSegment() {
     if (trimIn === null || trimOut === null) {
@@ -292,6 +296,9 @@ export default function DetailPanel({
             {cur.kind === "audio" && <audio controls src={mediaUrl(cur.id, "file")} />}
             {cur.kind === "image" && <img src={mediaUrl(cur.id, "file")} alt={cur.title} />}
           </div>
+          <p className="detail-hint">
+            ← → navega · I marca In · O marca Out · Esc cierra
+          </p>
 
           {cur.kind === "video" && (
             <div className="trim-bar detail-trim">

@@ -8,3 +8,12 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <App />
   </React.StrictMode>,
 );
+
+// PWA: registra el service worker SOLO en producción (en dev interfiere con HMR)
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  navigator.serviceWorker
+    .register("/sw.js")
+    .catch(() => {
+      /* la app funciona igual sin SW */
+    });
+}
