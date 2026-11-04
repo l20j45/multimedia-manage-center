@@ -4,6 +4,8 @@ import {
   bulkMedia,
   createCollection,
   deleteCollection,
+  createShare,
+  revokeShare,
   deleteMedia,
   exportUrl,
   getAutotagSuggestions,
@@ -15,6 +17,7 @@ import {
   purgeMedia,
   removeCollectionItem,
   restoreMedia,
+  shareLink,
   updateMe,
   updateMedia,
   uploadMedia,
@@ -134,6 +137,7 @@ export default function HomePage({
   });
   const [dupesOpen, setDupesOpen] = useState(false);
   const [dupes, setDupes] = useState<MediaItem[][]>([]);
+  const [shareLinkFor, setShareLinkFor] = useState<{ name: string; link: string } | null>(null);
 
   // Perfil
   const [profileOpen, setProfileOpen] = useState(false);
@@ -440,7 +444,15 @@ export default function HomePage({
 
   /* ------------------------------------------------------------ bulk bar */
   async function runBulk(
-    action: "add_tag" | "remove_tag" | "set_visibility" | "add_to_collection" | "delete" | "restore" | "purge",
+    action:
+      | "add_tag"
+      | "remove_tag"
+      | "set_visibility"
+      | "add_to_collection"
+      | "delete"
+      | "restore"
+      | "purge"
+      | "rename",
   ) {
     setBulkBusy(true);
     setBulkMsg("");
@@ -452,6 +464,9 @@ export default function HomePage({
       if (action === "add_to_collection") {
         if (!bulkColId) return;
         extra.collection_id = bulkColId;
+      }
+      if (action === "rename") {
+        extra.pattern = renamePattern.trim();
       }
       const res = await bulkMedia([...selectedIds], action, extra);
       setBulkMsg(`${res.done} procesado(s).`);
@@ -478,6 +493,29 @@ export default function HomePage({
       setColError(err instanceof Error ? err.message : "Error al crear la colección");
     }
   }
+
+  /* ---------------------------------------------------- compartir / rename */
+  async function createShareLink(col: Collection) {
+    setColError("");
+    try {
+      const r = await createShare(col.id);
+      setShareLinkFor({ name: col.name, link: shareLink(r.url) });
+    } catch (err) {
+      setColError(err instanceof Error ? err.message : "Error al crear el enlace");
+    }
+  }
+
+  async function revokeCollectionShare(col: Collection) {
+    setColError("");
+    try {
+      await revokeShare(col.id);
+      setBulkMsg(`Enlace de "${col.name}" revocado.`);
+    } catch (err) {
+      setColError(err instanceof Error ? err.message : "Error al revocar el enlace");
+    }
+  }
+
+  const [renamePattern, setRenamePattern] = useState("");
 
   async function handleRemoveFromCollection(item: MediaItem) {
     if (!selectedCol) return;
@@ -847,6 +885,21 @@ export default function HomePage({
                       → añadir
                     </button>
                     <button className="chip" disabled={bulkBusy} onClick={() => runBulk("set_visibility")}>👥 team</button>
+                    <input
+                      className="rename-input"
+                      placeholder="renombrar: meme-{date}-{n}"
+                      value={renamePattern}
+                      onChange={(e) => setRenamePattern(e.target.value)}
+                      aria-label="Patrón de renombrado"
+                    />
+                    <button
+                      className="chip"
+                      disabled={bulkBusy || !renamePattern.trim()}
+                      onClick={() => runBulk("rename")}
+                      title="Renombra con el patrón ({n}=orden, {date}=hoy, {title}=nombre actual)"
+                    >
+                      ✏️ renombrar
+                    </button>
                     <button className="chip danger" disabled={bulkBusy} onClick={() => runBulk("delete")}>🗑 papelera</button>
                   </>
                 )}
@@ -880,6 +933,23 @@ export default function HomePage({
                   <a className="chip" href={exportUrl(c.id, "csv")} download title="Exportar .csv">⬇ csv</a>
                   <button
                     className="chip"
+                    onClick={() => createShareLink(c)}
+                    title="Crear/rota el enlace público (sin login, revocable)"
+                  >
+                    🔗 compartir
+                  </button>
+                  <button
+                    className="chip"
+                    onClick={async () => {
+                      if (!window.confirm(`¿Revocar el enlace público de "${c.name}"?`)) return;
+                      await revokeCollectionShare(c);
+                    }}
+                    title="Revocar el enlace compartido"
+                  >
+                    🚫 revocar
+                  </button>
+                  <button
+                    className="chip"
                     onClick={() => {
                       setSelectedCol(c);
                       setNav("all");
@@ -901,6 +971,23 @@ export default function HomePage({
                 </div>
               ))}
             </div>
+            {shareLinkFor && (
+              <div className="share-result">
+                <p className="dupe-head">
+                  🔗 Enlace de «{shareLinkFor.name}» copiable (visitable sin login):
+                </p>
+                <div className="row">
+                  <input readOnly value={shareLinkFor.link} aria-label="Enlace compartido" onClick={(e) => (e.target as HTMLInputElement).select()} />
+                  <button
+                    className="primary"
+                    onClick={() => void navigator.clipboard?.writeText(shareLinkFor.link).then(() => setBulkMsg("Enlace copiado al portapapeles."))}
+                  >
+                    Copiar
+                  </button>
+                  <button className="ghost" onClick={() => setShareLinkFor(null)}>cerrar</button>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="lib">
@@ -1004,6 +1091,10 @@ export default function HomePage({
           onAddToCollectionPicker={(it) => setAddItemFor(it)}
           onTrimCreated={(frag: MediaItem) => {
             setBulkMsg(`✂ fragmento creado: ${frag.title}`);
+            Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
+          }}
+          onCreated={(frag: MediaItem) => {
+            setBulkMsg(`🎧 audio extraído: ${frag.title} — ábrelo y recorta tu SFX con I/O`);
             Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
           }}
         />

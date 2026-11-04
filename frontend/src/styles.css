@@ -283,6 +283,41 @@ body::before {
 .col-row .chip { padding: 0.15rem 0.6rem; }
 .col-row .chip.danger { border-color: #7a3a33; color: var(--danger); }
 
+/* --- compartir / rename / pública --- */
+.share-result {
+  margin-top: 0.9rem;
+  border: 1px solid #6a551c;
+  border-left: 4px solid var(--accent);
+  background: #2a230f;
+  border-radius: 10px;
+  padding: 0.8rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.share-result input {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  min-width: 0;
+}
+.bulk-bar .rename-input {
+  max-width: 230px;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+}
+
+.public-page { width: min(1200px, 96vw); margin: 0 auto; padding-bottom: 3rem; }
+.center-foot {
+  text-align: center;
+  margin-top: 2.5rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #5c6570;
+}
+
 /* login: tarjeta centrada y compacta */
 .card.auth-card { width: min(420px, 94vw); margin: 5vh auto; }
 

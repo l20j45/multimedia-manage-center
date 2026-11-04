@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { mediaUrl, rethumbMedia, trimMedia, updateMedia, type MediaItem, type MediaKind } from "../lib/api";
+import {
+  extractAudio,
+  mediaUrl,
+  rethumbMedia,
+  trimMedia,
+  updateMedia,
+  type MediaItem,
+  type MediaKind,
+} from "../lib/api";
 
 const KIND_LABEL: Record<MediaKind, string> = { audio: "Audio", image: "Imagen", video: "Video" };
 
@@ -33,13 +41,16 @@ export default function DetailPanel({
   onChanged,
   onAddToCollectionPicker,
   onTrimCreated,
+  onCreated,
 }: {
   item: MediaItem;
   onClose: () => void;
   onChanged: (updated: MediaItem) => void;
   onAddToCollectionPicker: (item: MediaItem) => void;
   onTrimCreated: (frag: MediaItem) => void;
+  onCreated?: (item: MediaItem) => void;
 }) {
+  const [extracting, setExtracting] = useState(false);
   const [cur, setCur] = useState(item);
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState(item.title);
@@ -115,6 +126,19 @@ export default function DetailPanel({
     }
   }
 
+  async function doExtractAudio() {
+    setExtracting(true);
+    setError("");
+    try {
+      const frag = await extractAudio(cur.id);
+      onCreated?.(frag);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al extraer audio");
+    } finally {
+      setExtracting(false);
+    }
+  }
+
   function addTags(raw: string): string[] {
     const clean = raw.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
     const next = [...new Set([...cur.tags, ...clean])];
@@ -175,6 +199,11 @@ export default function DetailPanel({
             <a className="ghost" href={mediaUrl(cur.id, "file")} download={cur.filename} aria-label="Descargar">
               ⬇ Descargar
             </a>
+            {cur.kind === "video" && (
+              <button className="ghost" onClick={doExtractAudio} disabled={extracting} title="Extrae la pista de audio como mp3 nuevo (para tu flujo SFX)">
+                {extracting ? "Extrayendo…" : "🎧 Extraer audio"}
+              </button>
+            )}
             <button className="ghost" onClick={() => onAddToCollectionPicker(cur)}>＋ Colección</button>
             {cur.deleted ? (
               <span className="chip danger-static">En papelera</span>

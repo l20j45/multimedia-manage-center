@@ -38,6 +38,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (res.status === 401 && !path.startsWith("/auth") && !path.startsWith("/media/public")) {
+    // sesión expirada: fuera tokens y de vuelta al login
+    clearToken();
+    window.location.assign("/");
+    return new Promise<T>(() => {}); // no resolvemos durante el redirect
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error((data as { detail?: string }).detail ?? `Error ${res.status}`);
@@ -221,8 +227,16 @@ export function getAutotagSuggestions(id: number): Promise<{ suggestions: string
 
 export function bulkMedia(
   ids: number[],
-  action: "add_tag" | "remove_tag" | "set_visibility" | "delete" | "restore" | "purge" | "add_to_collection",
-  extra: { tags?: string[]; visibility?: "private" | "team"; collection_id?: number } = {},
+  action:
+    | "add_tag"
+    | "remove_tag"
+    | "set_visibility"
+    | "delete"
+    | "restore"
+    | "purge"
+    | "add_to_collection"
+    | "rename",
+  extra: { tags?: string[]; visibility?: "private" | "team"; collection_id?: number; pattern?: string } = {},
 ): Promise<{ done: number; requested: number }> {
   return request("/media/bulk", {
     method: "POST",
@@ -279,6 +293,40 @@ export function createCollection(name: string, isProject = false): Promise<Colle
 
 export function updateCollection(id: number, data: { name?: string; is_project?: boolean }): Promise<Collection> {
   return request(`/collections/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+}
+
+// ---------------------------------------------------------------- compartir
+export interface ShareResult {
+  token: string;
+  url: string;
+}
+
+export function createShare(id: number): Promise<ShareResult> {
+  return request(`/collections/${id}/share`, { method: "POST" });
+}
+
+export function revokeShare(id: number): Promise<void> {
+  return request(`/collections/${id}/share`, { method: "DELETE" });
+}
+
+export interface PublicCollection {
+  name: string;
+  is_project: boolean;
+  items: MediaItem[];
+}
+
+export function fetchPublicCollection(token: string): Promise<PublicCollection> {
+  return request(`/media/public/${encodeURIComponent(token)}`);
+}
+
+/** URL de fichero/thumbnail accesible para VISITANTES del enlace compartido. */
+export function publicMediaUrl(id: number, shareToken: string, what: "file" | "thumb" = "file"): string {
+  return `${API_BASE}/media/${id}/${what}?share=${encodeURIComponent(shareToken)}`;
+}
+
+/** Enlace compartible completo para el visitante (la app sirve /share/...). */
+export function shareLink(url: string): string {
+  return `${window.location.origin}${url}`;
 }
 
 export function deleteCollection(id: number): Promise<void> {
