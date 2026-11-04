@@ -9,11 +9,18 @@ import HomePage from "./pages/HomePage";
 
 const listMedia = vi.fn();
 const listTags = vi.fn();
+const listCollections = vi.fn();
+const addCollectionItem = vi.fn();
 const mediaUrl = vi.fn(() => "http://fake/file");
 
 vi.mock("./lib/api", () => ({
   listMedia: (...args: unknown[]) => listMedia(...(args as [])),
   listTags: () => listTags(),
+  listCollections: () => listCollections(),
+  addCollectionItem: (...args: unknown[]) => addCollectionItem(...(args as [])),
+  removeCollectionItem: vi.fn(),
+  deleteCollection: vi.fn(),
+  collectionItems: vi.fn(),
   mediaUrl: () => mediaUrl(),
   updateMedia: vi.fn(),
   deleteMedia: vi.fn(),
@@ -40,7 +47,10 @@ describe("HomePage (biblioteca)", () => {
   beforeEach(() => {
     listMedia.mockReset();
     listTags.mockReset();
+    listCollections.mockReset();
+    addCollectionItem.mockReset();
     listTags.mockResolvedValue([]);
+    listCollections.mockResolvedValue([]);
     listMedia.mockResolvedValue({ items: [ITEM], total: 1 });
   });
 
@@ -91,5 +101,30 @@ describe("HomePage (biblioteca)", () => {
     const calls = listMedia.mock.calls;
     const lastCall = calls[calls.length - 1] as unknown[];
     expect((lastCall?.[0] as { tag?: string }).tag).toBe("intro");
+  });
+
+  it("seleccionar una colección filtra /media por collection", async () => {
+    listCollections.mockResolvedValue([{ id: 7, name: "B-roll", item_count: 2 }]);
+    const user = userEvent.setup({ delay: null });
+    render(<HomePage user={USER} onChange={() => {}} onLogout={() => {}} />);
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "Seleccionar colección" }),
+      "7",
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    const calls = listMedia.mock.calls;
+    const lastCall = calls[calls.length - 1] as unknown[];
+    expect((lastCall?.[0] as { collection?: number }).collection).toBe(7);
+  });
+
+  it("el botón + abre el popover y agrega a la colección elegida", async () => {
+    listCollections.mockResolvedValue([{ id: 7, name: "B-roll", item_count: 2 }]);
+    addCollectionItem.mockResolvedValue({ id: 7, name: "B-roll", item_count: 3 });
+    const user = userEvent.setup({ delay: null });
+    render(<HomePage user={USER} onChange={() => {}} onLogout={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: /Agregar Intro logo a una colección/ }));
+    await user.click(await screen.findByRole("button", { name: "Agregar a B-roll" }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(addCollectionItem).toHaveBeenCalledWith(7, ITEM.id);
   });
 });

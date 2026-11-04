@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  addCollectionItem,
+  createCollection,
   deleteMedia,
+  listCollections,
   listMedia,
   listTags,
   mediaUrl,
+  removeCollectionItem,
   updateMedia,
   updateMe,
   uploadMedia,
+  type Collection,
   type MediaItem,
   type MediaKind,
   type User,
@@ -67,7 +72,18 @@ export default function HomePage({
   const [title, setTitle] = useState("");
   const [tagsText, setTagsText] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
   const [uploadMsg, setUploadMsg] = useState("");
+
+  // Drag & drop de varios archivos
+  const [dragging, setDragging] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState("");
+
+  // Colecciones
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [selectedCol, setSelectedCol] = useState<Collection | null>(null);
+  const [colError, setColError] = useState("");
+  const [addItemFor, setAddItemFor] = useState<MediaItem | null>(null);
 
   // Edición y reproductor
   const [editing, setEditing] = useState<MediaItem | null>(null);
@@ -96,6 +112,14 @@ export default function HomePage({
     }
   }, []);
 
+  const loadCollections = useCallback(async () => {
+    try {
+      setCollections(await listCollections());
+    } catch {
+      setCollections([]);
+    }
+  }, []);
+
   const loadItems = useCallback(async () => {
     setLoading(true);
     setListError("");
@@ -104,6 +128,7 @@ export default function HomePage({
         q: debouncedQ || undefined,
         kind: tab === "all" ? undefined : tab,
         tag: activeTag ?? undefined,
+        collection: selectedCol?.id,
       });
       setItems(res.items);
       setTotal(res.total);
@@ -112,7 +137,7 @@ export default function HomePage({
     } finally {
       setLoading(false);
     }
-  }, [debouncedQ, tab, activeTag]);
+  }, [debouncedQ, tab, activeTag, selectedCol]);
 
   useEffect(() => {
     loadItems();
@@ -120,26 +145,102 @@ export default function HomePage({
 
   useEffect(() => {
     loadTags();
-  }, [loadTags]);
+    loadCollections();
+  }, [loadTags, loadCollections]);
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
     if (!file) return;
     setUploadMsg("");
     setUploading(true);
+    setUploadPct(0);
     try {
-      await uploadMedia(file, title, tagsText);
+      await uploadMedia(file, title, tagsText, setUploadPct);
       setUploadMsg("");
       setFile(null);
       setTitle("");
       setTagsText("");
       if (fileInput.current) fileInput.current.value = "";
       setUploadOpen(false);
-      await Promise.all([loadItems(), loadTags()]);
+      await Promise.all([loadItems(), loadTags(), loadCollections()]);
     } catch (err) {
       setUploadMsg(err instanceof Error ? err.message : "Error al subir");
     } finally {
       setUploading(false);
+    }
+  }
+
+  // ---- drag & drop: 1 archivo → dialogo pre-llenado; varios → subida · en lote
+  async function handleDropped(e: React.DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length === 0) return;
+    if (files.length === 1) {
+      setFile(files[0]);
+      setTitle(files[0].name.replace(/\.[^.]+$/, ""));
+      setUploadOpen(true);
+      return;
+    }
+    setBulkMsg("");
+    let done = 0;
+    let failed = 0;
+    for (const f of files) {
+      try {
+        await uploadMedia(f, f.name.replace(/\.[^.]+$/, ""), "");
+        done += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    setBulkMsg(
+      failed === 0
+        ? `${done} archivo(s) subidos.`
+        : `${done} subidos · ${failed} fallidos (revisa formato/tamaño).`,
+    );
+    await Promise.all([loadItems(), loadTags(), loadCollections()]);
+  }
+
+  // ---- colecciones
+  async function handleCreateCollection() {
+    const name = window.prompt("Nombre de la nueva colección (álbum/playlist):");
+    if (!name || !name.trim()) return;
+    setColError("");
+    try {
+      const col = await createCollection(name.trim());
+      setCollections((prev) => [...prev, col].sort((a, b) => a.name.localeCompare(b.name)));
+    } catch (err) {
+      setColError(err instanceof Error ? err.message : "Error al crear la colección");
+    }
+  }
+
+  async function handleAddToCollection(item: MediaItem, col: Collection) {
+    setColError("");
+    try {
+      const updated = await addCollectionItem(col.id, item.id);
+      setCollections((prev) =>
+        prev.map((c) => (c.id === updated.id ? updated : c)),
+      );
+      setAddItemFor(null);
+      await Promise.all([loadTags(), loadCollections()]);
+    } catch (err) {
+      setColError(err instanceof Error ? err.message : "Error al agregar a la colección");
+    }
+  }
+
+  async function handleRemoveFromCollection(item: MediaItem) {
+    if (!selectedCol) return;
+    setColError("");
+    try {
+      await removeCollectionItem(selectedCol.id, item.id);
+      const updated = { ...selectedCol, item_count: Math.max(0, selectedCol.item_count - 1) };
+      setSelectedCol(updated);
+      setCollections((prev) =>
+        prev.map((c) => (c.id === updated.id ? { ...c, item_count: updated.item_count } : c)),
+      );
+      await loadItems();
+    } catch (err) {
+      setColError(err instanceof Error ? err.message : "Error al quitar de la colección");
     }
   }
 
@@ -193,7 +294,23 @@ export default function HomePage({
   }
 
   return (
-    <div className="home">
+    <div
+      className="home"
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target) setDragging(false);
+      }}
+      onDrop={handleDropped}
+    >
+      {dragging && (
+        <div className="dropzone" aria-label="Zona de suelta de archivos">
+          <p>Suelta tus archivos aquí</p>
+          <p className="sub">1 archivo → revision antes de subir · varios → subida directa</p>
+        </div>
+      )}
       <header className="topbar">
         <h1>Biblioteca de Recursos Multimedia</h1>
         <div>
@@ -262,6 +379,7 @@ export default function HomePage({
               value={tagsText}
               onChange={(e) => setTagsText(e.target.value)}
             />
+            {uploading && <progress value={uploadPct} max={100} aria-label="Progreso de subida" />}
             {uploadMsg && <p className="error">{uploadMsg}</p>}
             <div className="row">
               <button type="button" className="ghost" onClick={() => setUploadOpen(false)}>
@@ -294,6 +412,34 @@ export default function HomePage({
               <button className="primary">Guardar</button>
             </div>
           </form>
+        </div>
+      )}
+
+      {addItemFor && (
+        <div className="overlay" onClick={() => setAddItemFor(null)}>
+          <div
+            className="card upload-card popover-collections"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2>Agregar a colección</h2>
+            <p className="sub">{addItemFor.title}</p>
+            {collections.length === 0 ? (
+              <p className="sub">Primero crea una colección con "+ Nueva".</p>
+            ) : (
+              <div className="col-options">
+                {collections.map((c) => (
+                  <button
+                    key={c.id}
+                    className="chip"
+                    onClick={() => handleAddToCollection(addItemFor, c)}
+                    aria-label={`Agregar a ${c.name}`}
+                  >
+                    {c.name} <span className="chip-count">{c.item_count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -338,6 +484,30 @@ export default function HomePage({
         </button>
       </div>
 
+      <div className="collections-bar">
+        <span className="label">Colecciones</span>
+        <select
+          aria-label="Seleccionar colección"
+          value={selectedCol?.id ?? ""}
+          onChange={(e) => {
+            const id = Number(e.target.value);
+            setSelectedCol(collections.find((c) => c.id === id) ?? null);
+          }}
+        >
+          <option value="">— ver todo —</option>
+          {collections.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name} ({c.item_count})
+            </option>
+          ))}
+        </select>
+        <button className="ghost" onClick={handleCreateCollection} aria-label="Nueva colección">
+          + Nueva
+        </button>
+        {bulkMsg && <span className="ok">{bulkMsg}</span>}
+        {colError && <span className="error">{colError}</span>}
+      </div>
+
       {tagChips.length > 0 && (
         <div className="tag-chips">
           {activeTag && (
@@ -367,13 +537,16 @@ export default function HomePage({
             <p>
               {debouncedQ || activeTag
                 ? "Sin resultados. Prueba otra búsqueda o quita el filtro."
-                : "Tu biblioteca está vacía todavía. Sube tu primer recurso."}
+                : "Nada por aquí todavía. Sube o arrastra tus primeros recursos."}
             </p>
           </div>
         )}
         {!loading && items.length > 0 && (
           <>
-            <p className="sub count">{total} recurso(s)</p>
+            <p className="sub count">
+              {selectedCol ? `Colección "${selectedCol.name}" · ` : ""}
+              {total} recurso(s)
+            </p>
             <div className="media-grid">
               {items.map((item) => (
                 <article className="media-card" key={item.id}>
@@ -410,6 +583,27 @@ export default function HomePage({
                     </span>
                   </div>
                   <div className="media-actions">
+                    {collections.length > 0 && (
+                      selectedCol ? (
+                        <button
+                          className="ghost"
+                          onClick={() => handleRemoveFromCollection(item)}
+                          aria-label={`Quitar ${item.title} de la colección ${selectedCol.name}`}
+                          title={`Quitar de "${selectedCol.name}"`}
+                        >
+                          －
+                        </button>
+                      ) : (
+                        <button
+                          className="ghost"
+                          onClick={() => setAddItemFor(item)}
+                          aria-label={`Agregar ${item.title} a una colección`}
+                          title="Agregar a una colección"
+                        >
+                          ＋
+                        </button>
+                      )
+                    )}
                     <button
                       className="ghost"
                       onClick={() => setPlaying(item)}

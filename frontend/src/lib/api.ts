@@ -104,37 +104,55 @@ export interface MediaList {
 }
 
 export function listMedia(
-  params: { q?: string; kind?: MediaKind; tag?: string; limit?: number; offset?: number } = {},
+  params: {
+    q?: string;
+    kind?: MediaKind;
+    tag?: string;
+    collection?: number;
+    limit?: number;
+    offset?: number;
+  } = {},
 ): Promise<MediaList> {
   const search = new URLSearchParams();
   if (params.q) search.set("q", params.q);
   if (params.kind) search.set("kind", params.kind);
   if (params.tag) search.set("tag", params.tag);
+  if (params.collection) search.set("collection", String(params.collection));
   if (params.limit) search.set("limit", String(params.limit));
   if (params.offset) search.set("offset", String(params.offset));
   const qs = search.toString();
   return request(`/media${qs ? `?${qs}` : ""}`);
 }
 
-/** Sube con FormData (el fetch no debe poner Content-Type: lo fija el navegador). */
+/** Sube con FormData + XHR (para reportar progreso; el navegador fija Content-Type). */
 export function uploadMedia(
   file: File,
   title: string,
   tagsCsv: string,
+  onProgress?: (pct: number) => void,
 ): Promise<MediaItem> {
-  const form = new FormData();
-  form.append("file", file);
-  form.append("title", title);
-  form.append("tags", tagsCsv);
-  const token = getToken();
-  return fetch(`${API_BASE}/media`, {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: form,
-  }).then(async (res) => {
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error((data as { detail?: string }).detail ?? `Error ${res.status}`);
-    return data as MediaItem;
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("title", title);
+    form.append("tags", tagsCsv);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE}/media`);
+    const token = getToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      const data = JSON.parse(xhr.responseText || "{}") as MediaItem & { detail?: string };
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new Error(data.detail ?? `Error ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error("Error de red al subir"));
+    xhr.send(form);
   });
 }
 
@@ -157,4 +175,38 @@ export function listTags(): Promise<{ tag: string; count: number }[]> {
 export function mediaUrl(id: number, what: "file" | "thumb" = "file"): string {
   const token = getToken() ?? "";
   return `${API_BASE}/media/${id}/${what}?access_token=${encodeURIComponent(token)}`;
+}
+
+// ---------------------------------------------------------------- colecciones
+export interface Collection {
+  id: number;
+  name: string;
+  item_count: number;
+}
+
+export function listCollections(): Promise<Collection[]> {
+  return request("/collections");
+}
+
+export function createCollection(name: string): Promise<Collection> {
+  return request("/collections", { method: "POST", body: JSON.stringify({ name }) });
+}
+
+export function deleteCollection(id: number): Promise<void> {
+  return request(`/collections/${id}`, { method: "DELETE" });
+}
+
+export function collectionItems(id: number): Promise<MediaItem[]> {
+  return request(`/collections/${id}/items`);
+}
+
+export function addCollectionItem(id: number, mediaId: number): Promise<Collection> {
+  return request(`/collections/${id}/items`, {
+    method: "POST",
+    body: JSON.stringify({ media_id: mediaId }),
+  });
+}
+
+export function removeCollectionItem(id: number, mediaId: number): Promise<void> {
+  return request(`/collections/${id}/items/${mediaId}`, { method: "DELETE" });
 }
