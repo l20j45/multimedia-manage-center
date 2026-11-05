@@ -11,6 +11,7 @@ import {
   exportZipUrl,
   fetchStats,
   findByHash,
+  getApiBase,
   getAutotagSuggestions,
   getGeminiKeyStatus,
   listCollections,
@@ -22,6 +23,7 @@ import {
   removeCollectionItem,
   restoreMedia,
   jobStatus,
+  setApiBase,
   setGeminiKey,
   sha256OfFile,
   shareLink,
@@ -141,9 +143,13 @@ export default function HomePage({
                 : "🗜 compresión lista (el original ya era compacto — sin cambios)",
             );
             await loadItems(0, true);
-          } else if (st.status === "failed") {
+          } else if (st.status === "failed" || st.status === "lost") {
             setCompressJobs((prev) => prev.filter((id) => id !== itemId));
-            toast(`⚠ compresión falló: ${st.error ?? "error desconocido"}`);
+            toast(
+              st.status === "lost"
+                ? "⚠ compresión interrumpida por un reinicio — re-inténtala con 🗜 Comprimir"
+                : `⚠ compresión falló: ${st.error ?? "error desconocido"}`,
+            );
           }
         } catch {
           setCompressJobs((prev) => prev.filter((id) => id !== itemId));
@@ -197,6 +203,23 @@ export default function HomePage({
   const [name, setName] = useState(user.name ?? "");
   const [busy, setBusy] = useState(false);
   const [profileError, setProfileError] = useState("");
+
+  // Servidor (dirección del backend): clave para APK / oficina
+  const [apiBase, setApiBaseState] = useState(getApiBase());
+  const [apiSaved, setApiSaved] = useState(false);
+
+  function saveApiBase() {
+    setApiSaved(false);
+    try {
+      const stored = setApiBase(apiBase);
+      setApiBaseState(stored);
+      setApiSaved(true);
+      toast(`🌐 servidor: ${stored}`);
+      window.setTimeout(() => window.location.reload(), 900); // reconectar
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : "URL inválida");
+    }
+  }
 
   // Llave IA (configuración desde la app)
   const [geminiKey, setGeminiKeyValue] = useState("");
@@ -423,10 +446,11 @@ export default function HomePage({
     files: File[],
     onTick: (doneIndex: number, pctFile: number) => void,
     shared?: { tags: string; description: string },
-  ): Promise<{ done: number; failed: number; dups: number }> {
+  ): Promise<{ done: number; failed: number; dups: number; sims: number }> {
     let done = 0;
     let failed = 0;
     let dups = 0;
+    let sims = 0;
     for (const [i, f] of files.entries()) {
       try {
         const up = await uploadMedia(
@@ -438,12 +462,13 @@ export default function HomePage({
         );
         if (up.compress_job_id) trackJob(up.id);
         if (up.duplicate_of) dups += 1;
+        if (up.similar_of) sims += 1;
         done += 1;
       } catch {
         failed += 1;
       }
     }
-    return { done, failed, dups };
+    return { done, failed, dups, sims };
   }
 
   async function handleUpload(e: React.FormEvent) {
@@ -459,10 +484,12 @@ export default function HomePage({
           visibility,
         });
         if (up.compress_job_id) trackJob(up.id);
-        await postUploadRefresh();
         if (up.duplicate_of) {
           toast(`⚠ mismo contenido que «${up.duplicate_of.title}» — mira la sección de duplicados`);
+        } else if (up.similar_of) {
+          toast(`👁 muy parecido a «${up.similar_of.title}» — revisa la sección de duplicados`);
         }
+        await postUploadRefresh();
         getAutotagSuggestions(up.id)
           .then((r) => {
             if (r.suggestions.length > 0) {
@@ -477,7 +504,7 @@ export default function HomePage({
           })
           .catch(() => {});
       } else {
-        const { done, failed, dups } = await uploadMany(
+        const { done, failed, dups, sims } = await uploadMany(
           selectedFiles,
           (doneIdx, pctFile) =>
             setUploadPct(((doneIdx + pctFile / 100) / selectedFiles.length) * 100),
@@ -487,7 +514,8 @@ export default function HomePage({
           (failed === 0
             ? `${done} archivo(s) subidos`
             : `${done} subidos · ${failed} fallidos`)
-            + (dups > 0 ? ` · ⚠ ${dups} duplicado(s)` : ""),
+            + (dups > 0 ? ` · ⚠ ${dups} duplicado(s)` : "")
+            + (sims > 0 ? ` · 👁 ${sims} muy parecido(s)` : ""),
         );
         await postUploadRefresh();
       }
@@ -515,12 +543,13 @@ export default function HomePage({
       setUploadOpen(true);
       return;
     }
-    const { done, failed, dups } = await uploadMany(files, () => {});
+    const { done, failed, dups, sims } = await uploadMany(files, () => {});
     toast(
       (failed === 0
         ? `${done} archivo(s) subidos`
         : `${done} subidos · ${failed} fallidos`)
-        + (dups > 0 ? ` · ⚠ ${dups} duplicado(s)` : ""),
+        + (dups > 0 ? ` · ⚠ ${dups} duplicado(s)` : "")
+        + (sims > 0 ? ` · 👁 ${sims} muy parecido(s)` : ""),
     );
     await postUploadRefresh();
   }
@@ -1370,6 +1399,42 @@ export default function HomePage({
                 </button>
               </div>
             </form>
+
+            <div className="detail-section gemini-section">
+              <p className="snav-label">🌐 Servidor (backend)</p>
+              <p className="sub">
+                Dirección del backend en uso: <code>{apiBase}</code>. Cámbiala
+                para apuntar a otra máquina (ej. <code>http://192.168.1.10:8000</code>).
+              </p>
+              <input
+                placeholder="http://192.168.1.10:8000"
+                value={apiBase}
+                onChange={(e) => {
+                  setApiBaseState(e.target.value);
+                  setApiSaved(false);
+                }}
+                aria-label="Dirección del servidor"
+              />
+              <div className="row">
+                <button className="primary" onClick={saveApiBase} title="Guarda y reconecta al momento">
+                  {apiSaved ? "Guardado ✓" : "Guardar y reconectar"}
+                </button>
+                {getApiBase() !== apiBase && (
+                  <button
+                    className="ghost"
+                    onClick={() => {
+                      setApiBaseState(getApiBase());
+                      setApiSaved(true);
+                    }}
+                  >
+                    Revertir
+                  </button>
+                )}
+              </div>
+              <p className="sub tiny-note">
+                Se guarda en este dispositivo (localStorage): cada teléfono/oficina apunta a donde le toca.
+              </p>
+            </div>
 
             <div className="detail-section gemini-section">
               <p className="snav-label">🤖 Auto-tag con IA — llave de Gemini</p>

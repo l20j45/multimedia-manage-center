@@ -17,6 +17,7 @@ vi.mock("./lib/api", () => ({
   splitMedia: vi.fn(),
   trimMedia: vi.fn(),
   extractAudio: vi.fn(),
+  getApiBase: () => "http://fake",
 }));
 
 const ITEM = {

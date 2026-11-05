@@ -96,6 +96,8 @@ class MediaOut(BaseModel):
     compress_job_id: str | None = None
     # anti-duplicado: si otro item tuyo ya tiene EXACTAMENTE este contenido
     duplicate_of: MediaRef | None = None
+    # gemelo VISUAL (pHash ≤ umbral; mismo look, bytes distintos)
+    similar_of: MediaRef | None = None
 
     @classmethod
     def from_item(cls, item: MediaItem) -> MediaOut:

@@ -5,9 +5,11 @@ Crea gemelos visuales que NO comparten bytes (re-save con metadata PNG
 distinta) y una no-duplicada para verificar que queda fuera.
 """
 
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, PngImagePlugin
 
+from app.config import settings
 from app.main import app
 from app.services import media as media_svc
 from tests.test_media import auth, register_and_login
@@ -58,6 +60,44 @@ def test_phash_identico_aunque_bytes_diffieran() -> None:
     assert not media_svc.phash_images_related(h1, h3)
 
 
+def test_audios_gemelos_via_onda(monkeypatch) -> None:
+    """El mismo material en distinto bitrate produce Onda igual → similar."""
+    import tempfile
+    from pathlib import Path
+
+    if not media_svc.ffmpeg_bin():
+        pytest.skip("ffmpeg no disponible")
+    monkeypatch.setattr(settings, "PHASH_MAX_BITS", 14)  # waveforms tolerantes
+
+    def mp3(q: str) -> bytes:
+        tmp = Path(tempfile.mkdtemp(prefix="phash-audio-")) / "a.mp3"
+        media_svc._ffmpeg_run(
+            [
+                media_svc.ffmpeg_bin(), "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "sine=frequency=880:duration=2",
+                "-codec:a", "libmp3lame", "-q:a", q, str(tmp),
+            ], 60,
+        )
+        return tmp.read_bytes()
+
+    token = register_and_login("phash-aud")
+    r1 = client.post(
+        "/media", headers=auth(token), data={"title": "SFX 320", "tags": ""},
+        files={"file": ("a1.mp3", mp3("2"), "audio/mpeg")},
+    )
+    assert r1.status_code == 201
+    r2 = client.post(
+        "/media", headers=auth(token), data={"title": "SFX 128", "tags": ""},
+        files={"file": ("a2.mp3", mp3("6"), "audio/mpeg")},
+    )
+    assert r2.status_code == 201
+    assert r2.json()["duplicate_of"] is None, "bytes distintos: no es copia exacta"
+    assert r2.json()["similar_of"] is not None, "la 2ª subida detecta el gemelo de audio"
+
+    out = client.get("/media/duplicates", headers=auth(token)).json()
+    assert out["similar"], "grupo de audios gemelos en el modal"
+
+
 def test_upload_imagen_rellena_phash() -> None:
     """El hash perceptual se calcula al subir (comprueba BD)."""
     token = register_and_login("phash-up")
@@ -92,6 +132,17 @@ def test_duplicados_endpoint_expose_similar() -> None:
     assert len(ids) == 2, "solo las dos similares"
     assert z_id not in ids, "la imagen distinta no se reporta como gemela"
     assert out["groups"] == [], "bytes distintas → NO van como copias exactas"
+
+    # la 2ª subida AVISA en el response con `similar_of` (gemelo visual)
+    resp = client.post(
+        "/media",
+        headers=auth(token),
+        data={"title": " otra igual", "tags": ""},
+        files={"file": ("d2.png", retina_png("tercera"), "image/png")},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["similar_of"] is not None, "aviso de gemelo visual en upload"
+
 
     # sin gemelos: similar vacío
     other = register_and_login("phash-tonely")

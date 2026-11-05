@@ -14,6 +14,7 @@ Thumbnails:
 import io
 import shutil
 import subprocess
+import sys
 import uuid
 from datetime import UTC
 from pathlib import Path
@@ -26,6 +27,28 @@ AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".oga", ".m4a", ".flac", ".aac", ".opus", 
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
 
 CHUNK = 1024 * 1024  # stream de 1 MB al guardar
+
+
+def _ffmpeg_run(cmd: list[str], timeout: int, cmd_name: str = "ffmpeg", text: bool = False):
+    """subprocess.run de ffmpeg/ffprobe en BAJA PRIORIDAD (FFMPEG_LOW_PRIORITY).
+
+    No congela la UI del resto de la biblioteca mientras hay un re-encode
+    pesado: Windows usa BELOW_NORMAL_PRIORITY_CLASS, posix hace `nice -n 10`.
+    """
+    if settings.FFMPEG_LOW_PRIORITY and cmd_name in ("ffmpeg", "ffprobe"):
+        if sys.platform == "win32":
+            return subprocess.run(
+                cmd, timeout=timeout, check=True, capture_output=True, text=text,
+                creationflags=subprocess.BELOW_NORMAL_PRIORITY_CLASS,
+            )
+        # posix: nice sólo si el binario existe (en Docker slim a veces no)
+        nice = shutil.which("nice")
+        if nice:
+            return subprocess.run(
+                [nice, "-n", "10", *cmd],
+                timeout=timeout, check=True, capture_output=True, text=text,
+            )
+    return subprocess.run(cmd, timeout=timeout, check=True, capture_output=True, text=text)
 
 
 def detect_kind(filename: str) -> str:
@@ -166,7 +189,7 @@ def make_thumbnail(rel_path: str, kind: str) -> str | None:
                 "-y",
                 str(dst_abs),
             ]
-            subprocess.run(cmd, timeout=60, check=True, capture_output=True)
+            _ffmpeg_run(cmd, 60)
             if not dst_abs.exists():
                 return None
         elif kind == "audio" and ffmpeg_bin():
@@ -183,7 +206,7 @@ def make_thumbnail(rel_path: str, kind: str) -> str | None:
                 "-y",
                 str(dst_abs),
             ]
-            subprocess.run(cmd, timeout=60, check=True, capture_output=True)
+            _ffmpeg_run(cmd, 60)
             if not dst_abs.exists():
                 return None
         else:
@@ -222,7 +245,7 @@ def extract_audio(rel_path: str, kind: str) -> str | None:
         str(dst_abs),
     ]
     try:
-        subprocess.run(cmd, timeout=300, check=True, capture_output=True)
+        _ffmpeg_run(cmd, 300)
     except Exception:  # noqa: BLE001
         dst_abs.unlink(missing_ok=True)
         return None
@@ -248,7 +271,7 @@ def trim_segment(rel_path: str, kind: str, start: float, end: float | None) -> s
         cmd += ["-to", f"{end:.3f}"]
     cmd += ["-i", str(src), "-c", "copy", "-y", str(dst_abs)]
     try:
-        subprocess.run(cmd, timeout=300, check=True, capture_output=True)
+        _ffmpeg_run(cmd, 300)
     except Exception:  # noqa: BLE001
         dst_abs.unlink(missing_ok=True)
         return None
@@ -285,7 +308,7 @@ def rethumbnail_at(rel_path: str, at_seconds: float) -> str | None:
             "-y",
             str(dst_abs),
         ]
-        subprocess.run(cmd, timeout=60, check=True, capture_output=True)
+        _ffmpeg_run(cmd, 60)
         if not dst_abs.exists():
             return None
     except Exception:  # noqa: BLE001
@@ -303,7 +326,7 @@ def probe_duration(rel_path: str, kind: str) -> float | None:
         return None
     src = media_root() / rel_path
     try:
-        res = subprocess.run(
+        res = _ffmpeg_run(
             [
                 ffprobe,
                 "-v",
@@ -314,9 +337,8 @@ def probe_duration(rel_path: str, kind: str) -> float | None:
                 "default=noprint_wrappers=1:nokey=1",
                 str(src),
             ],
-            capture_output=True,
-            check=True,
-            timeout=30,
+            30,
+            "ffprobe",
             text=True,
         )
         return round(float(res.stdout.strip()), 2)
@@ -369,7 +391,7 @@ def compress_video(rel_path: str) -> tuple[str, int, bool] | None:
     ]
     try:
         # videos largos pueden tardar; 1h de margen (timeout generoso)
-        subprocess.run(cmd, timeout=3600, check=True, capture_output=True)
+        _ffmpeg_run(cmd, 3600)
     except Exception:  # noqa: BLE001 - compresión es best-effort
         dst_abs.unlink(missing_ok=True)
         return None
@@ -471,6 +493,28 @@ def phash_image_bytes(data: bytes) -> str | None:
     return phash_image("", data=data)
 
 
+def phash_for_media(rel_path: str, kind: str) -> str | None:
+    """Hash perceptual de un item según su tipo.
+
+    - imagen: del fichero en sí (la foto es lo que se compara).
+    - audio/video: de su THUMBNAIL (envelope de la onda / poster del frame
+      1) → detecta el mismo material re-codificado/re-descargado aunque
+      cambie el mp3/mp4/container.
+    """
+    if kind == "image":
+        p = media_root() / rel_path
+        return phash_image(p) if p.is_file() else None
+    if not rel_path:
+        return None
+    thumb = media_root() / rel_path
+    if not thumb.is_file():
+        return None
+    try:
+        return phash_image("", data=thumb.read_bytes())
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def phash_reliable(a: str | None, b: str | None, maxbits: int = 5) -> bool:
     """True si dos hashes perceptuales son 'gemelos visuales' (<= maxbits)."""
     if not a or not b or len(a) != 16 or len(b) != 16:
@@ -501,7 +545,7 @@ def split_by_silence(
         return None
     src = media_root() / rel_path
     try:
-        res = subprocess.run(
+        res = _ffmpeg_run(
             [
                 ff,
                 "-hide_banner",
@@ -514,9 +558,7 @@ def split_by_silence(
                 "null",
                 "-",
             ],
-            capture_output=True,
-            check=True,
-            timeout=300,
+            300,
             text=True,
         )
     except Exception:  # noqa: BLE001
@@ -595,8 +637,8 @@ def backfill_hashes() -> int:
                         h.update(chunk)
                 it.sha256 = h.hexdigest()
                 touched = True
-            if it.kind == "image" and it.phash is None:
-                it.phash = phash_image(path)
+            if it.phash is None:
+                it.phash = phash_for_media(it.path, it.kind)
                 touched = touched or it.phash is not None
             if touched:
                 n += 1

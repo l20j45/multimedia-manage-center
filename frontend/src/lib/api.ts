@@ -1,7 +1,28 @@
 // Cliente HTTP hacia el backend FastAPI.
-// URL externa (http://localhost) en dev; dentro de Tauri la ventana sirve la UI.
+// URL por defecto de build (VITE_API_URL); sobre-escrita EN RUNTIME por la
+// "Dirección del servidor" guardada desde el perfil (clave para APK/móvil o
+// cambiar de máquina sin recompilar).
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const DEFAULT_API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const API_BASE_KEY = "api_base";
+
+/** Base real en uso: override de perfil o la de build. */
+export function getApiBase(): string {
+  const override = localStorage.getItem(API_BASE_KEY);
+  return override && override.trim() ? override.trim().replace(/\/+$/, "") : DEFAULT_API_BASE;
+}
+
+/** Guarda/cambia la dirección del backend ("" o null = volver al default). */
+export function setApiBase(url: string): string {
+  const clean = url.trim().replace(/\/+$/, "");
+  if (clean && !/^https?:\/\//i.test(clean)) {
+    throw new Error("La dirección debe empezar por http:// o https://");
+  }
+  if (clean) localStorage.setItem(API_BASE_KEY, clean);
+  else localStorage.removeItem(API_BASE_KEY);
+  return getApiBase();
+}
+
 
 export interface User {
   id: number;
@@ -37,7 +58,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const res = await fetch(`${getApiBase()}${path}`, { ...options, headers });
   if (res.status === 401 && !path.startsWith("/auth") && !path.startsWith("/media/public")) {
     // sesión expirada: fuera tokens y de vuelta al login
     clearToken();
@@ -102,6 +123,7 @@ export function resetPassword(email: string, code: string, newPassword: string):
 // ---------------------------------------------------------------- media
 export type MediaKind = "audio" | "image" | "video";
 
+
 export interface MediaItem {
   id: number;
   kind: MediaKind;
@@ -123,22 +145,27 @@ export interface MediaItem {
   compress_job_id?: string | null;
   /** anti-duplicado: mismo contenido que otro item tuyo */
   duplicate_of?: { id: number; title: string } | null;
+  /** gemelo VISUAL: parecido pero con bytes distintos (pHash) */
+  similar_of?: { id: number; title: string } | null;
 }
 
 /** Estado del último job de compresión de un item. */
+
 export interface JobStatus {
   job_id: string;
   item_id: number;
-  status: "none" | "queued" | "running" | "done" | "failed";
+  status: "none" | "queued" | "running" | "done" | "failed" | "lost";
   old_size: number | null;
   new_size: number | null;
   error: string | null;
 }
 
+
 export interface MediaList {
   items: MediaItem[];
   total: number;
 }
+
 
 export interface MediaQuery {
   q?: string;
@@ -184,7 +211,7 @@ export function uploadMedia(
     if (extra.visibility) form.append("visibility", extra.visibility);
 
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${API_BASE}/media`);
+    xhr.open("POST", `${getApiBase()}/media`);
     const token = getToken();
     if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
     xhr.upload.onprogress = (e) => {
@@ -313,7 +340,7 @@ export function splitMedia(
 
 export function exportUrl(id: number, format: "txt" | "csv" = "txt"): string {
   const token = getToken() ?? "";
-  return `${API_BASE}/collections/${id}/export?format=${format}&access_token=${encodeURIComponent(token)}`;
+  return `${getApiBase()}/collections/${id}/export?format=${format}&access_token=${encodeURIComponent(token)}`;
 }
 
 export function listTags(): Promise<{ tag: string; count: number }[]> {
@@ -323,10 +350,11 @@ export function listTags(): Promise<{ tag: string; count: number }[]> {
 /** URL del fichero/thumbnail con el token en query (los <img>/<video> no mandan header). */
 export function mediaUrl(id: number, what: "file" | "thumb" = "file"): string {
   const token = getToken() ?? "";
-  return `${API_BASE}/media/${id}/${what}?access_token=${encodeURIComponent(token)}`;
+  return `${getApiBase()}/media/${id}/${what}?access_token=${encodeURIComponent(token)}`;
 }
 
 // ---------------------------------------------------------------- colecciones
+
 export interface Collection {
   id: number;
   name: string;
@@ -347,6 +375,7 @@ export function updateCollection(id: number, data: { name?: string; is_project?:
 }
 
 // ---------------------------------------------------------------- compartir
+
 export interface ShareResult {
   token: string;
   url: string;
@@ -360,6 +389,7 @@ export function revokeShare(id: number): Promise<void> {
   return request(`/collections/${id}/share`, { method: "DELETE" });
 }
 
+
 export interface PublicCollection {
   name: string;
   is_project: boolean;
@@ -372,7 +402,7 @@ export function fetchPublicCollection(token: string): Promise<PublicCollection> 
 
 /** URL de fichero/thumbnail accesible para VISITANTES del enlace compartido. */
 export function publicMediaUrl(id: number, shareToken: string, what: "file" | "thumb" = "file"): string {
-  return `${API_BASE}/media/${id}/${what}?share=${encodeURIComponent(shareToken)}`;
+  return `${getApiBase()}/media/${id}/${what}?share=${encodeURIComponent(shareToken)}`;
 }
 
 /** Enlace compartible completo para el visitante (la app sirve /share/...). */
@@ -391,8 +421,9 @@ export function collectionItems(id: number): Promise<MediaItem[]> {
 /** URL para descargar la colección completa como .zip (ficheros reales). */
 export function exportZipUrl(id: number): string {
   const token = getToken() ?? "";
-  return `${API_BASE}/collections/${id}/export-zip?access_token=${encodeURIComponent(token)}`;
+  return `${getApiBase()}/collections/${id}/export-zip?access_token=${encodeURIComponent(token)}`;
 }
+
 
 export interface StatOut {
   by_kind: Record<string, { count: number; size: number }>;

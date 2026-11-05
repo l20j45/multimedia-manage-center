@@ -35,10 +35,21 @@ except Exception:  # noqa: BLE001 - nunca bloquea el arranque
     pass
 
 # Duplicados: legacy sin sha256/phash quedaban invisibles; se recalculan al vuelo.
+from app.services.jobs import recover_stale  # noqa: E402
+
 try:
     filled = backfill_hashes()
     if filled:
         print(f"duplicados: rescatados hashes de {filled} recurso(s)")
+except Exception:  # noqa: BLE001 - nunca bloquea el arranque
+    pass
+
+# Compresión: jobs que quedaron colgando del proceso anterior → 'lost'
+# (el item nunca queda roto; el cliente deja de poller y se entera).
+try:
+    lost = recover_stale()
+    if lost:
+        print(f"compresión: {lost} job(s) huérfanos marcados 'lost'")
 except Exception:  # noqa: BLE001 - nunca bloquea el arranque
     pass
 

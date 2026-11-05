@@ -105,6 +105,10 @@ def upload(
         item.duration_s = media_svc.probe_duration(rel_path, kind)
     if kind == "image":
         item.phash = media_svc.phash_image(media_svc.media_root() / rel_path)
+    elif item.thumb_path:
+        # audio/video: la onda/poster sirve de huella visual (material igual
+        # re-codificado da un thumb casi idéntico)
+        item.phash = media_svc.phash_for_media(item.thumb_path, kind)
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -115,7 +119,7 @@ def upload(
     if settings.COMPRESS_ENABLED and (
         encolable_imagen or (kind == "video" and media_svc.ffmpeg_bin() is not None)
     ):
-        job_id = jobs_svc.enqueue_compress(item.id)
+        job_id = jobs_svc.enqueue_compress(item.id, kind)
     # anti-duplicado: ¿ya tenía EXACTAMENTE este contenido (otro nombre)?
     dup = None
     if sha:
@@ -130,10 +134,29 @@ def upload(
             .order_by(MediaItem.created_at)
             .first()
         )
+    # gemelo VISUAL: mismo look aunque cambien los bytes (pHash ≤ umbral)
+    similar = None
+    if item.phash:
+        for other in (
+            db.query(MediaItem)
+            .filter(
+                MediaItem.owner_id == user.id,
+                MediaItem.deleted_at.is_(None),
+                MediaItem.kind == kind,
+                MediaItem.phash.is_not(None),
+            )
+            .order_by(MediaItem.created_at)
+        ):
+            if media_svc.phash_reliable(item.phash, other.phash):
+                similar = other  # el primero por orden de creación
+                break
     payload = schemas.MediaOut.from_item(item)
     payload.compress_job_id = job_id
     payload.duplicate_of = (
         schemas.MediaRef(id=dup.id, title=dup.title) if dup else None
+    )
+    payload.similar_of = (
+        schemas.MediaRef(id=similar.id, title=similar.title) if similar else None
     )
     return payload
 
@@ -298,11 +321,13 @@ def duplicates(
 
     # gemelos visuales: comparación par a par en RAM (64-bit XOR: rápido
     # incluso con miles de imágenes en una biblioteca personal).
+    # phash de CUALQUIER tipo: imagen=hay el fichero; audio/video=su
+    # thumbnail (onda/poster). Sólo se comparan items del MISMO kind: el
+    # hash de una foto NO es comparable con el de una onda de audio.
     imgs = (
         db.query(MediaItem)
         .filter(
             MediaItem.owner_id == user.id,
-            MediaItem.kind == "image",
             MediaItem.phash.is_not(None),
             MediaItem.deleted_at.is_(None),
         )
@@ -320,13 +345,19 @@ def duplicates(
     for i in range(len(imgs)):
         for j in range(i + 1, len(imgs)):
             a, b = imgs[i], imgs[j]
-            if media_svc.phash_reliable(a.phash, b.phash, settings.PHASH_MAX_BITS):
+            if a.kind == b.kind and media_svc.phash_reliable(
+                a.phash, b.phash, settings.PHASH_MAX_BITS
+            ):
                 parent[find(a.id)] = find(b.id)
 
     clusters: dict[int, list[schemas.MediaOut]] = {}
     for it in imgs:
         clusters.setdefault(find(it.id), []).append(schemas.MediaOut.from_item(it))
-    similar = [members for members in clusters.values() if len(members) >= 2]
+    similar = [
+        members for members in clusters.values() if len(members) >= 2
+        # si TODOS son copias byte-idénticas, ya están en `groups`: no mostrarles doble
+        and not all(m.id in exact_ids for m in members)
+    ]
     return schemas.DuplicateGroups(groups=groups, similar=similar)
 
 
@@ -406,6 +437,7 @@ def trim_media(
         size=size,
     )
     frag.thumb_path = media_svc.make_thumbnail(rel, frag.kind)
+    frag.phash = media_svc.phash_for_media(frag.thumb_path or rel, frag.kind)
     if media_svc.ffmpeg_bin():
         frag.duration_s = media_svc.probe_duration(rel, frag.kind)
     db.add(frag)
@@ -449,6 +481,7 @@ def extract_audio(
         size=size,
     )
     audio.thumb_path = media_svc.make_thumbnail(rel, "audio")  # waveform
+    audio.phash = media_svc.phash_for_media(audio.thumb_path or rel, "audio")
     if media_svc.ffmpeg_bin():
         audio.duration_s = media_svc.probe_duration(rel, "audio")
     db.add(audio)
@@ -505,6 +538,8 @@ def rethumb(
     if not thumb:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="ffmpeg no disponible")
     item.thumb_path = thumb
+    # el poster cambió: su huella visual también
+    item.phash = media_svc.phash_for_media(thumb, item.kind)
     db.commit()
     db.refresh(item)
     return schemas.MediaOut.from_item(item)
@@ -535,7 +570,7 @@ def compress_item(
         )
     if item.kind == "video" and not media_svc.ffmpeg_bin():
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="ffmpeg no disponible")
-    job_id = jobs_svc.enqueue_compress(item.id)
+    job_id = jobs_svc.enqueue_compress(item.id, item.kind)
     return schemas.CompressJobOut(job_id=job_id, status="queued")
 
 
@@ -589,6 +624,7 @@ def split_audio(
             size=size,
         )
         frag.thumb_path = media_svc.make_thumbnail(rel, "audio")
+        frag.phash = media_svc.phash_for_media(frag.thumb_path or rel, "audio")
         if media_svc.ffmpeg_bin():
             frag.duration_s = media_svc.probe_duration(rel, "audio")
         db.add(frag)

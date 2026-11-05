@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     FFMPEG_PATH: str = ""
     FFPROBE_PATH: str = ""
 
+    # ffmpeg en baja prioridad: no congela la app mientras re-encodea
+    # (Windows: BELOW_NORMAL_PRIORITY_CLASS; posix: nice -n 10).
+    FFMPEG_LOW_PRIORITY: bool = True
+
+    # Workers de compresión en paralelo. 0 = auto: 2 normal; 1 en ARM
+    # (Rasp Pi: saturar 4 núcleos con ffmpeg congela toda la casa).
+    COMPRESS_WORKERS: int = 0
+
     # Rate limiting por IP en /auth/* (login, registro, recuperación)
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_WINDOW: int = 60  # segundos por ventana

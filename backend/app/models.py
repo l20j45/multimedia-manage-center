@@ -116,3 +116,28 @@ class AppSetting(Base):
     key: Mapped[str] = mapped_column(String(60), primary_key=True)
     value: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CompressionJob(Base):
+    """Job de compresión PERSISTIDO (sobrevive reinicios del server).
+
+    Estado en BD, no en RAM: si el proceso muere a media compresión, el
+    item queda intacto y el job queda visible como 'running' huérfano →
+    al arrancar se marcan 'lost' para que nadie espere un aviso eterno.
+    """
+
+    __tablename__ = "compression_jobs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # hex corto
+    item_id: Mapped[int] = mapped_column(ForeignKey("media_items.id"), index=True, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(12), index=True, nullable=False
+    )  # queued|running|done|failed|lost
+    old_size: Mapped[int | None] = mapped_column(nullable=True)
+    new_size: Mapped[int | None] = mapped_column(nullable=True)
+    error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)  # video|image
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   compressMedia,
   extractAudio,
+  jobStatus,
   mediaUrl,
   rethumbMedia,
   splitMedia,
@@ -62,6 +63,8 @@ export default function DetailPanel({
   const [compressing, setCompressing] = useState(false);
   const [splitting, setSplitting] = useState(false);
   const [notice, setNotice] = useState("");
+  // estado del job de compresión del CUR (si tiene) mientras está abierto
+  const [jobActive, setJobActive] = useState(false);
   const [cur, setCur] = useState(item);
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState(item.title);
@@ -83,7 +86,36 @@ export default function DetailPanel({
     setCur(item);
     setTitleDraft(item.title);
     setNotes(item.description ?? "");
+    setNotice("");
   }, [item]);
+
+  // si el item en pantalla está comprimiéndose (job activo), muéstralo al
+  // toque; al terminar, la lista ya habrá refrescado de la mano del poller.
+  useEffect(() => {
+    let alive = true;
+    let resetTimer: ReturnType<typeof setTimeout> | undefined;
+    setJobActive(false);
+    async function poll() {
+      try {
+        const st = await jobStatus(cur.id);
+        if (!alive) return;
+        if (st.status === "queued" || st.status === "running") {
+          setJobActive(true);
+          resetTimer = setTimeout(poll, 2000);
+        } else {
+          setJobActive(false);
+        }
+      } catch {
+        if (alive) setJobActive(false);
+      }
+    }
+    poll();
+    return () => {
+      alive = false;
+      if (resetTimer) clearTimeout(resetTimer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cur.id, cur.path]);
 
   // teclas I/O para marcar In/Out y ←/→ para navegar mientras esté abierto
   useEffect(() => {
@@ -361,6 +393,11 @@ export default function DetailPanel({
 
           {error && <p className="error">{error}</p>}
           {notice && <p className="sub">{notice}</p>}
+          {jobActive && !notice && (
+            <p className="sub">
+              🗜 Comprimiendo este recurso en background… te avisamos al terminar.
+            </p>
+          )}
         </div>
 
         {/* ---------- panel derecho: CONTENIDO + NOTAS ---------- */}

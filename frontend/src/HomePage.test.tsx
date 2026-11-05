@@ -34,6 +34,7 @@ vi.mock("./lib/api", () => ({
   rethumbMedia: vi.fn(),
   compressMedia: vi.fn(),
   jobStatus: vi.fn(),
+  getApiBase: () => "http://fake", // HomePage usa el server en el perfil
   createCollection: vi.fn(),
 }));
 
