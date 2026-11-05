@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     COMPRESS_CRF: int = 26
     COMPRESS_MAX_HEIGHT: int = 1080
     COMPRESS_AUDIO_KBPS: int = 128
+    # Imágenes: solo se recomprimen si superan este tamaño (KB); JPEG q85,
+    # o WebP si traen transparencia (PNG/WebP con alfa).
+    COMPRESS_IMG_MIN_KB: int = 200
 
     @property
     def cors_origins(self) -> list[str]:

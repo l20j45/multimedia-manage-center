@@ -121,6 +121,8 @@ export interface MediaItem {
   created_at: string;
   /** Job de compresión en background (solo videos; el cliente polla el estado) */
   compress_job_id?: string | null;
+  /** anti-duplicado: mismo contenido que otro item tuyo */
+  duplicate_of?: { id: number; title: string } | null;
 }
 
 /** Estado del último job de compresión de un item. */
@@ -293,6 +295,17 @@ export function compressMedia(id: number): Promise<{ job_id: string }> {
 /** Estado del último job de compresión del item (queued/running/done/failed). */
 export function jobStatus(itemId: number): Promise<JobStatus> {
   return request(`/media/jobs/latest/${itemId}`);
+}
+
+/** Separa un audio por silencios → lista de fragmentos nuevos (201). */
+export function splitMedia(
+  id: number,
+  opts: { noise_db?: number; min_len?: number } = {},
+): Promise<MediaItem[]> {
+  return request<{ items: MediaItem[] }>(`/media/${id}/split`, {
+    method: "POST",
+    body: JSON.stringify(opts),
+  }).then((r) => r.items);
 }
 
 export function exportUrl(id: number, format: "txt" | "csv" = "txt"): string {

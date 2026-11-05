@@ -383,6 +383,121 @@ def compress_video(rel_path: str) -> tuple[str, int, bool] | None:
     return rel_path, src.stat().st_size, False
 
 
+def compress_image(rel_path: str) -> tuple[str, int, bool] | None:
+    """Comprime una IMAGEN (Pillow, sin ffmpeg): JPEG q85; WebP q80 si trae
+    transparencia (mantiene alfa). Sólo si pesa > COMPRESS_IMG_MIN_KB.
+
+    Mismo contrato que compress_video: (ruta_final, size, reemplazo) o None.
+    Si el resultado NO pesa menos borra el comprimido y queda el original.
+    """
+    try:
+        from PIL import Image
+    except ImportError:  # pragma: no cover - Pillow es dependencia base
+        return None
+    root = media_root()
+    src = root / rel_path
+    if not src.exists() or src.stat().st_size <= settings.COMPRESS_IMG_MIN_KB * 1024:
+        return None
+    name = Path(rel_path)
+    dst_abs: Path | None = None
+    try:
+        img = Image.open(src)
+        has_alpha = img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info
+        ext = ".webp" if has_alpha else ".jpg"
+        dst_name = f"{name.stem}_c{uuid.uuid4().hex[:6]}{ext}"
+        dst_abs = src.parent / dst_name
+        if has_alpha:
+            img.save(dst_abs, "WEBP", quality=80)
+        else:
+            img.convert("RGB").save(dst_abs, "JPEG", quality=85)
+    except Exception:  # noqa: BLE001 - compresión best-effort
+        if dst_abs:
+            dst_abs.unlink(missing_ok=True)
+        return None
+    finally:
+        try:
+            img.close()
+        except Exception:  # noqa: BLE001
+            pass
+    if not dst_abs.exists() or dst_abs.stat().st_size == 0:
+        dst_abs.unlink(missing_ok=True)
+        return None
+    new_size = dst_abs.stat().st_size
+    if new_size < src.stat().st_size:
+        src.unlink(missing_ok=True)
+        return f"{name.parent / dst_name}", new_size, True
+    dst_abs.unlink(missing_ok=True)
+    return rel_path, src.stat().st_size, False
+
+
+IMG_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
+
+
+def split_by_silence(
+    rel_path: str, noise_db: int = -40, min_len: float = 1.0, max_parts: int = 100
+) -> list[str] | None:
+    """Separa un AUDIO en trozos por silencios (poder del `silencedetect`).
+
+    Cada rango de sonido continuo (entre silencios >= min_len) se corta con
+    `trim_segment` (-c copy: rapido, sin recodificar). Devuelve las rutas
+    relativas de los fragmentos o None si no hay ffmpeg/falló.
+    """
+    import re
+
+    ff = ffmpeg_bin()
+    if not ff:
+        return None
+    src = media_root() / rel_path
+    try:
+        res = subprocess.run(
+            [
+                ff,
+                "-hide_banner",
+                "-nostats",
+                "-i",
+                str(src),
+                "-af",
+                f"silencedetect=noise={noise_db}dB:d={min_len}",
+                "-f",
+                "null",
+                "-",
+            ],
+            capture_output=True,
+            check=True,
+            timeout=300,
+            text=True,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    starts = [float(m) for m in re.findall(r"silence_start: ([\d.]+)", res.stderr)]
+    ends = [float(m) for m in re.findall(r"silence_end: ([\d.]+)", res.stderr)]
+    if not starts:
+        return []  # sin silencios: el audio es continuo, nada que separar
+    duration = probe_duration(rel_path, "audio")
+
+    # Rangos de sonido = lo que queda ENTRE silencios.
+    ranges: list[tuple[float, float | None]] = []
+    cursor = 0.0
+    for i, s in enumerate(starts):
+        if s > cursor:
+            ranges.append((cursor, s))
+        cursor = ends[i] if i < len(ends) else None
+        if cursor is None:
+            break
+    if cursor is not None and duration is not None and cursor < duration - 0.05:
+        ranges.append((cursor, duration))
+
+    frags: list[str] = []
+    for start, end in ranges[:max_parts]:
+        start = max(0.0, start)
+        if end is not None and end - start < 0.05:
+            continue
+        rel = trim_segment(rel_path, "audio", start, end)
+        if rel:
+            frags.append(rel)
+    return frags
+
+
 def delete_files(rel_paths: list[str | None]) -> None:
     """Borra ficheros físicos (best-effort): main + thumbs de un item."""
     for rel in rel_paths:
@@ -390,6 +505,44 @@ def delete_files(rel_paths: list[str | None]) -> None:
             continue
         p = media_root() / rel
         p.unlink(missing_ok=True)
+
+
+def backfill_sha256() -> int:
+    """Recalcula sha256 de items que quedaron sin hash (uploads legacy).
+
+    Corre al arrancar el backend (silencioso). Sin sha256 esos items son
+    invisibles para el detector de duplicados y el anti-dup del pegado.
+    Devuelve la cantidad de filas rescatadas.
+    """
+    import hashlib
+
+    from app.database import SessionLocal
+    from app.models import MediaItem
+
+    root = media_root()
+    db = SessionLocal()
+    n = 0
+    try:
+        rows = (
+            db.query(MediaItem)
+            .filter(MediaItem.sha256.is_(None), MediaItem.deleted_at.is_(None))
+            .all()
+        )
+        for it in rows:
+            path = root / it.path
+            if not path.is_file():
+                continue
+            h = hashlib.sha256()
+            with path.open("rb") as f:
+                for chunk in iter(lambda: f.read(CHUNK), b""):
+                    h.update(chunk)
+            it.sha256 = h.hexdigest()
+            n += 1
+        if n:
+            db.commit()
+    finally:
+        db.close()
+    return n
 
 
 def purge_expired_trash(max_age_days: int | None = None) -> int:

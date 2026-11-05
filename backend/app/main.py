@@ -25,12 +25,20 @@ def run_migrations() -> None:
 run_migrations()
 
 # Papelera: purga lo que lleva más de TRASH_RETENTION_DAYS borrado (silencioso).
-from app.services.media import purge_expired_trash  # noqa: E402
+from app.services.media import backfill_sha256, purge_expired_trash  # noqa: E402
 
 try:
     purged = purge_expired_trash()
     if purged:
         print(f"papelera: purgados {purged} recurso(s) expirados")
+except Exception:  # noqa: BLE001 - nunca bloquea el arranque
+    pass
+
+# Duplicados: legacy sin sha256 quedaban invisibles; se recalculan al vuelo.
+try:
+    filled = backfill_sha256()
+    if filled:
+        print(f"duplicados: rescatado sha256 de {filled} recurso(s)")
 except Exception:  # noqa: BLE001 - nunca bloquea el arranque
     pass
 

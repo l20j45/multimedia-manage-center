@@ -70,6 +70,11 @@ def tags_csv(tags: list[str]) -> str:
     return ",".join(parse_tags(",".join(tags)))
 
 
+class MediaRef(BaseModel):
+    id: int
+    title: str
+
+
 class MediaOut(BaseModel):
     id: int
     kind: MediaKind
@@ -89,6 +94,8 @@ class MediaOut(BaseModel):
     created_at: datetime
     # job de compresión en background (solo videos con auto-compress activo)
     compress_job_id: str | None = None
+    # anti-duplicado: si otro item tuyo ya tiene EXACTAMENTE este contenido
+    duplicate_of: MediaRef | None = None
 
     @classmethod
     def from_item(cls, item: MediaItem) -> MediaOut:
@@ -168,6 +175,15 @@ class JobOut(BaseModel):
     old_size: int | None = None
     new_size: int | None = None
     error: str | None = None
+
+
+class SplitIn(BaseModel):
+    """Cómo detectar los silencios para splitear un audio."""
+
+    noise_db: int = Field(-40, ge=-80, le=0, description='Umbral de "silencio" en dB')
+    min_len: float = Field(
+        1.0, ge=0.05, le=60, description="Silencio mínimo (segundos) para cortar"
+    )
 
 
 class RethumbIn(BaseModel):

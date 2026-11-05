@@ -107,11 +107,32 @@ def upload(
     db.commit()
     db.refresh(item)
     # Compresión automática en background (cola; el item arriba ya es válido).
+    # Imágenes pesadas siempre (Pillow); videos solo si hay ffmpeg.
     job_id = None
-    if kind == "video" and settings.COMPRESS_ENABLED and media_svc.ffmpeg_bin():
+    encolable_imagen = kind == "image" and size > settings.COMPRESS_IMG_MIN_KB * 1024
+    if settings.COMPRESS_ENABLED and (
+        encolable_imagen or (kind == "video" and media_svc.ffmpeg_bin() is not None)
+    ):
         job_id = jobs_svc.enqueue_compress(item.id)
+    # anti-duplicado: ¿ya tenía EXACTAMENTE este contenido (otro nombre)?
+    dup = None
+    if sha:
+        dup = (
+            db.query(MediaItem)
+            .filter(
+                MediaItem.sha256 == sha,
+                MediaItem.owner_id == user.id,
+                MediaItem.deleted_at.is_(None),
+                MediaItem.id != item.id,
+            )
+            .order_by(MediaItem.created_at)
+            .first()
+        )
     payload = schemas.MediaOut.from_item(item)
     payload.compress_job_id = job_id
+    payload.duplicate_of = (
+        schemas.MediaRef(id=dup.id, title=dup.title) if dup else None
+    )
     return payload
 
 
@@ -454,21 +475,84 @@ def compress_item(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> schemas.CompressJobOut:
-    """Comprime un video EN BACKGROUND (cola): responde 202 al toque.
+    """Comprime un video o imagen EN BACKGROUND (cola): responde 202 al toque.
 
     El original se reemplaza solo si el resultado pesa menos. Cuando
     termina, consulta el estado en GET /media/jobs/latest/{item_id}
-    (o el job_id devuelto). 503 sin ffmpeg.
+    (o el job_id devuelto). 503 sin ffmpeg en videos; imágenes van con
+    Pillow (siempre disponible).
     """
     item = _owned_item(db, user, item_id)
-    if item.kind != "video":
+    if item.kind not in ("video", "image"):
         raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, detail="Solo los videos se pueden comprimir"
+            status.HTTP_400_BAD_REQUEST,
+            detail="Solo los videos e imágenes se pueden comprimir",
         )
-    if not media_svc.ffmpeg_bin():
+    if item.kind == "video" and not media_svc.ffmpeg_bin():
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="ffmpeg no disponible")
     job_id = jobs_svc.enqueue_compress(item.id)
     return schemas.CompressJobOut(job_id=job_id, status="queued")
+
+
+@router.post(
+    "/{item_id}/split", response_model=schemas.MediaList, status_code=status.HTTP_201_CREATED
+)
+def split_audio(
+    item_id: int,
+    data: schemas.SplitIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> schemas.MediaList:
+    """Separa un AUDIO por silencios → N recursos nuevos.
+
+    Detecta los rangos de sonido (ffmpeg silencedetect con noise_db/min_len)
+    y corta cada uno con -c copy (sin recodificar). El original queda
+    intacto, igual que en /trim. Devuelve la lista de fragmentos creados.
+    """
+    item = _owned_item(db, user, item_id)
+    if item.kind != "audio":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="Solo los audios se pueden separar"
+        )
+    frags_rel: list[str] | None = media_svc.split_by_silence(
+        item.path, data.noise_db, data.min_len
+    )
+    if frags_rel is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ffmpeg no disponible para separar el audio",
+        )
+    if not frags_rel:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="No se detectaron silencios con ese umbral; prueba otro noise_db/min_len",
+        )
+    out: list[schemas.MediaOut] = []
+    frags: list[MediaItem] = []
+    for i, rel in enumerate(frags_rel, 1):
+        size = (media_svc.media_root() / rel).stat().st_size
+        frag = MediaItem(
+            owner_id=user.id,
+            kind="audio",
+            title=f"{item.title} (parte {i}/{len(frags_rel)})",
+            tags=item.tags,
+            description=f"Separado de «{item.title}» por silencio",
+            visibility=item.visibility,
+            filename=Path(item.filename).stem + f"_parte{i}" + Path(item.filename).suffix,
+            path=rel,
+            mime=item.mime,
+            size=size,
+        )
+        frag.thumb_path = media_svc.make_thumbnail(rel, "audio")
+        if media_svc.ffmpeg_bin():
+            frag.duration_s = media_svc.probe_duration(rel, "audio")
+        db.add(frag)
+        frags.append(frag)
+    db.commit()
+    for frag in frags:
+        db.refresh(frag)
+        out.append(schemas.MediaOut.from_item(frag))
+    return schemas.MediaList(items=out, total=len(out))
 
 
 @router.get("/jobs/latest/{item_id}", response_model=schemas.JobOut)

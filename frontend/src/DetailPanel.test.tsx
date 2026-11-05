@@ -14,6 +14,7 @@ vi.mock("./lib/api", () => ({
   rethumbMedia: vi.fn(),
   compressMedia: vi.fn(),
   jobStatus: vi.fn(),
+  splitMedia: vi.fn(),
   trimMedia: vi.fn(),
   extractAudio: vi.fn(),
 }));

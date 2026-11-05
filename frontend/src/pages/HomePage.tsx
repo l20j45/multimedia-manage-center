@@ -422,9 +422,10 @@ export default function HomePage({
     files: File[],
     onTick: (doneIndex: number, pctFile: number) => void,
     shared?: { tags: string; description: string },
-  ): Promise<{ done: number; failed: number }> {
+  ): Promise<{ done: number; failed: number; dups: number }> {
     let done = 0;
     let failed = 0;
+    let dups = 0;
     for (const [i, f] of files.entries()) {
       try {
         const up = await uploadMedia(
@@ -435,12 +436,13 @@ export default function HomePage({
           { description: shared?.description ?? "", visibility },
         );
         if (up.compress_job_id) trackJob(up.id);
+        if (up.duplicate_of) dups += 1;
         done += 1;
       } catch {
         failed += 1;
       }
     }
-    return { done, failed };
+    return { done, failed, dups };
   }
 
   async function handleUpload(e: React.FormEvent) {
@@ -457,6 +459,9 @@ export default function HomePage({
         });
         if (up.compress_job_id) trackJob(up.id);
         await postUploadRefresh();
+        if (up.duplicate_of) {
+          toast(`⚠ mismo contenido que «${up.duplicate_of.title}» — mira la sección de duplicados`);
+        }
         getAutotagSuggestions(up.id)
           .then((r) => {
             if (r.suggestions.length > 0) {
@@ -471,16 +476,17 @@ export default function HomePage({
           })
           .catch(() => {});
       } else {
-        const { done, failed } = await uploadMany(
+        const { done, failed, dups } = await uploadMany(
           selectedFiles,
           (doneIdx, pctFile) =>
             setUploadPct(((doneIdx + pctFile / 100) / selectedFiles.length) * 100),
           { tags: tagsText, description },
         );
         toast(
-          failed === 0
+          (failed === 0
             ? `${done} archivo(s) subidos`
-            : `${done} subidos · ${failed} fallidos`,
+            : `${done} subidos · ${failed} fallidos`)
+            + (dups > 0 ? ` · ⚠ ${dups} duplicado(s)` : ""),
         );
         await postUploadRefresh();
       }
@@ -508,8 +514,13 @@ export default function HomePage({
       setUploadOpen(true);
       return;
     }
-    const { done, failed } = await uploadMany(files, () => {});
-    toast(failed === 0 ? `${done} archivo(s) subidos` : `${done} subidos · ${failed} fallidos`);
+    const { done, failed, dups } = await uploadMany(files, () => {});
+    toast(
+      (failed === 0
+        ? `${done} archivo(s) subidos`
+        : `${done} subidos · ${failed} fallidos`)
+        + (dups > 0 ? ` · ⚠ ${dups} duplicado(s)` : ""),
+    );
     await postUploadRefresh();
   }
 
@@ -1322,6 +1333,12 @@ export default function HomePage({
             Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
           }}
           onCompressQueued={(itemId: number) => trackJob(itemId)}
+          onSplitCreated={(frags: MediaItem[]) => {
+            if (frags.length > 0) {
+              toast(`✂ separado por silencios: ${frags.length} parte(s) nueva(s)`);
+              Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
+            }
+          }}
         />
       )}
 

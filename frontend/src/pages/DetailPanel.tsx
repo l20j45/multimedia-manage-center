@@ -4,6 +4,7 @@ import {
   extractAudio,
   mediaUrl,
   rethumbMedia,
+  splitMedia,
   trimMedia,
   updateMedia,
   type MediaItem,
@@ -45,6 +46,7 @@ export default function DetailPanel({
   onCreated,
   onNavigate,
   onCompressQueued,
+  onSplitCreated,
 }: {
   item: MediaItem;
   onClose: () => void;
@@ -54,9 +56,11 @@ export default function DetailPanel({
   onCreated?: (item: MediaItem) => void;
   onNavigate?: (dir: 1 | -1) => void;
   onCompressQueued?: (itemId: number) => void;
+  onSplitCreated?: (frags: MediaItem[]) => void;
 }) {
   const [extracting, setExtracting] = useState(false);
   const [compressing, setCompressing] = useState(false);
+  const [splitting, setSplitting] = useState(false);
   const [notice, setNotice] = useState("");
   const [cur, setCur] = useState(item);
   const [renaming, setRenaming] = useState(false);
@@ -66,6 +70,11 @@ export default function DetailPanel({
   const [notesBusy, setNotesBusy] = useState(false);
   const [error, setError] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  // el reproductor presente según el tipo (para las teclas I/O)
+  function timeOf(): number {
+    return videoRef.current?.currentTime ?? audioRef.current?.currentTime ?? 0;
+  }
   const [trimIn, setTrimIn] = useState<number | null>(null);
   const [trimOut, setTrimOut] = useState<number | null>(null);
   const [trimBusy, setTrimBusy] = useState(false);
@@ -81,13 +90,14 @@ export default function DetailPanel({
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement;
       if (["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)) return;
-      if (e.key === "I") setTrimIn(videoRef.current?.currentTime ?? 0);
-      if (e.key === "O") setTrimOut(videoRef.current?.currentTime ?? 0);
+      if (e.key === "I") setTrimIn(timeOf());
+      if (e.key === "O") setTrimOut(timeOf());
       if (e.key === "ArrowRight") onNavigate?.(1);
       if (e.key === "ArrowLeft") onNavigate?.(-1);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onNavigate]);
 
   async function cutSegment() {
@@ -163,6 +173,25 @@ export default function DetailPanel({
     }
   }
 
+  async function doSplit() {
+    setSplitting(true);
+    setError("");
+    setNotice("");
+    try {
+      const frags = await splitMedia(cur.id);
+      setNotice(
+        frags.length === 0
+          ? "Solo se detectó sonido continuo: nada que separar."
+          : `✂ ${frags.length} parte(s) creadas por silencios.`,
+      );
+      onSplitCreated?.(frags);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al separar el audio");
+    } finally {
+      setSplitting(false);
+    }
+  }
+
   function addTags(raw: string): string[] {
     const clean = raw.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
     const next = [...new Set([...cur.tags, ...clean])];
@@ -228,12 +257,12 @@ export default function DetailPanel({
                 {extracting ? "Extrayendo…" : "🎧 Extraer audio"}
               </button>
             )}
-            {cur.kind === "video" && (
+            {(cur.kind === "video" || cur.kind === "image") && (
               <button
                 className="ghost"
                 onClick={doCompress}
                 disabled={compressing}
-                title="Re-encodea a H.264 y baja la resolución al máx altura configurado; ahorra espacio sin pérdida visible"
+                title="Optimiza el original en background (video: H.264+a escala máx; imagen: JPEG/WebP). Se reemplaza solo si pesa menos."
               >
                 {compressing ? "En cola…" : "🗜 Comprimir"}
               </button>
@@ -340,25 +369,27 @@ export default function DetailPanel({
             {cur.kind === "video" && (
               <video key={cur.path} controls src={mediaUrl(cur.id, "file")} ref={videoRef} />
             )}
-            {cur.kind === "audio" && <audio controls src={mediaUrl(cur.id, "file")} />}
+            {cur.kind === "audio" && (
+              <audio key={cur.path} controls src={mediaUrl(cur.id, "file")} ref={audioRef} />
+            )}
             {cur.kind === "image" && <img src={mediaUrl(cur.id, "file")} alt={cur.title} />}
           </div>
           <p className="detail-hint">
             ← → navega · I marca In · O marca Out · Esc cierra
           </p>
 
-          {cur.kind === "video" && (
+          {(cur.kind === "video" || cur.kind === "audio") && (
             <div className="trim-bar detail-trim">
               <button
                 className="chip"
-                onClick={() => setTrimIn(videoRef.current?.currentTime ?? 0)}
+                onClick={() => setTrimIn(timeOf())}
                 title="Marcar In (tecla I)"
               >
                 [In{trimIn === null ? "" : ` ${trimIn.toFixed(1)}s`}]
               </button>
               <button
                 className="chip"
-                onClick={() => setTrimOut(videoRef.current?.currentTime ?? 0)}
+                onClick={() => setTrimOut(timeOf())}
                 title="Marcar Out (tecla O)"
               >
                 [Out{trimOut === null ? "" : ` ${trimOut.toFixed(1)}s`}]
@@ -371,9 +402,21 @@ export default function DetailPanel({
               >
                 {trimBusy ? "Cortando…" : "✂ Cortar In→Out"}
               </button>
-              <button className="chip" onClick={useThisFrame} title="Usar este frame como poster">
-                🖼 Este frame
-              </button>
+              {cur.kind === "video" && (
+                <button className="chip" onClick={useThisFrame} title="Usar este frame como poster">
+                  🖼 Este frame
+                </button>
+              )}
+              {cur.kind === "audio" && (
+                <button
+                  className="chip"
+                  disabled={splitting}
+                  onClick={doSplit}
+                  title="Detecta los silencios y crea un recurso por cada trozo de sonido"
+                >
+                  {splitting ? "Separando…" : "✂ Separar por silencios"}
+                </button>
+              )}
             </div>
           )}
 
