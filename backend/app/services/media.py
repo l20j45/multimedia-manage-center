@@ -11,6 +11,7 @@ Thumbnails:
   - audio: sin thumbnail (la UI muestra reproductor)
 """
 
+import io
 import shutil
 import subprocess
 import uuid
@@ -433,6 +434,57 @@ def compress_image(rel_path: str) -> tuple[str, int, bool] | None:
 IMG_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 
 
+def phash_image(path: Path | str, data: bytes | None = None) -> str | None:
+    """Hash PERCEPTUAL dHash de 64 bits (hex de 16 chars) para imágenes.
+
+    Gris 9x8 (LANCZOS) → cada pixel contra su vecino derecho → 64 bits.
+    Robusto a re-compression/re-save: el mismo look da el MISMO hash aunque
+    los bytes cambien (tu meme re-descargado / re-guardado). Pequeños
+    recortes/rotaciones cambian el hash — límite honesto del método.
+
+    `data` (bytes) o `path`; para bytes usa `phash_image_bytes`.
+    """
+    try:
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(data) if data is not None else path)
+        try:
+            gray = img.convert("L").resize((9, 8), Image.Resampling.LANCZOS)
+            raw = gray.tobytes()  # 8 filas x 9 bytes (L = 1 byte por pixel)
+        finally:
+            img.close()
+        bits = 0
+        bit_index = 0
+        for row in range(8):
+            start = row * 9
+            for col in range(8):
+                if raw[start + col] > raw[start + col + 1]:
+                    bits |= 1 << bit_index
+                bit_index += 1
+        return f"{bits:016x}"
+    except Exception:  # noqa: BLE001 - hash best-effort
+        return None
+
+
+def phash_image_bytes(data: bytes) -> str | None:
+    """dHash directo de bytes (tests y flujos en memoria)."""
+    return phash_image("", data=data)
+
+
+def phash_reliable(a: str | None, b: str | None, maxbits: int = 5) -> bool:
+    """True si dos hashes perceptuales son 'gemelos visuales' (<= maxbits)."""
+    if not a or not b or len(a) != 16 or len(b) != 16:
+        return False
+    try:
+        ia, ib = int(a, 16), int(b, 16)
+    except ValueError:
+        return False
+    return bin(ia ^ ib).count("1") <= maxbits
+
+
+phash_images_related = phash_reliable  # alias testable
+
+
 def split_by_silence(
     rel_path: str, noise_db: int = -40, min_len: float = 1.0, max_parts: int = 100
 ) -> list[str] | None:
@@ -507,12 +559,12 @@ def delete_files(rel_paths: list[str | None]) -> None:
         p.unlink(missing_ok=True)
 
 
-def backfill_sha256() -> int:
-    """Recalcula sha256 de items que quedaron sin hash (uploads legacy).
+def backfill_hashes() -> int:
+    """Recalcula hashes de items que quedaron sin ellos (uploads legacy).
 
-    Corre al arrancar el backend (silencioso). Sin sha256 esos items son
-    invisibles para el detector de duplicados y el anti-dup del pegado.
-    Devuelve la cantidad de filas rescatadas.
+    Corre al arrancar el backend (silencioso) activos: sha256 que quedó
+    None INVISIBLE para el detector de duplicados y phash de imágenes para
+    el lab de gemelos visuales. Devuelve la cantidad de filas tocadas.
     """
     import hashlib
 
@@ -525,19 +577,29 @@ def backfill_sha256() -> int:
     try:
         rows = (
             db.query(MediaItem)
-            .filter(MediaItem.sha256.is_(None), MediaItem.deleted_at.is_(None))
+            .filter(
+                MediaItem.deleted_at.is_(None),
+                (MediaItem.sha256.is_(None)) | (MediaItem.phash.is_(None)),
+            )
             .all()
         )
         for it in rows:
             path = root / it.path
             if not path.is_file():
                 continue
-            h = hashlib.sha256()
-            with path.open("rb") as f:
-                for chunk in iter(lambda: f.read(CHUNK), b""):
-                    h.update(chunk)
-            it.sha256 = h.hexdigest()
-            n += 1
+            touched = False
+            if it.sha256 is None:
+                h = hashlib.sha256()
+                with path.open("rb") as f:
+                    for chunk in iter(lambda: f.read(CHUNK), b""):
+                        h.update(chunk)
+                it.sha256 = h.hexdigest()
+                touched = True
+            if it.kind == "image" and it.phash is None:
+                it.phash = phash_image(path)
+                touched = touched or it.phash is not None
+            if touched:
+                n += 1
         if n:
             db.commit()
     finally:

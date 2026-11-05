@@ -103,6 +103,8 @@ def upload(
     item.thumb_path = media_svc.make_thumbnail(rel_path, kind)
     if media_svc.ffmpeg_bin():
         item.duration_s = media_svc.probe_duration(rel_path, kind)
+    if kind == "image":
+        item.phash = media_svc.phash_image(media_svc.media_root() / rel_path)
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -252,12 +254,21 @@ def public_collection(
     )
 
 
+PHASH_MAX_BITS: int = 5  # bits cambiados = "parecísimo" (env PHASH_MAX_BITS)
+
+
 @router.get("/duplicates", response_model=schemas.DuplicateGroups)
 def duplicates(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> schemas.DuplicateGroups:
-    """Grupos de recursos con EXACTAMENTE el mismo contenido (por sha256)."""
+    """Grupos de recursos con contenido IGUAL (sha256) y PARECIDO (phash).
+
+    - `groups`: bytes idénticos (mismo sha256) — se pueden purgar Feliz.
+    - `similar`: imágenes "gemelas de la vista" (dHash ≤ PHASH_MAX_BITS de
+      distancia hamming): re-descargadas / re-guardadas / re-comprimidas.
+      SOLO lectura — revisa antes de borrar algo de aquí.
+    """
     rows = (
         db.query(MediaItem.sha256, func.count(MediaItem.id))
         .filter(
@@ -270,6 +281,7 @@ def duplicates(
         .all()
     )
     groups: list[list[schemas.MediaOut]] = []
+    exact_ids: set[int] = set()
     for sha, _ in rows:
         items = (
             db.query(MediaItem)
@@ -282,7 +294,40 @@ def duplicates(
             .all()
         )
         groups.append([schemas.MediaOut.from_item(i) for i in items])
-    return schemas.DuplicateGroups(groups=groups)
+        exact_ids.update(i.id for i in items)
+
+    # gemelos visuales: comparación par a par en RAM (64-bit XOR: rápido
+    # incluso con miles de imágenes en una biblioteca personal).
+    imgs = (
+        db.query(MediaItem)
+        .filter(
+            MediaItem.owner_id == user.id,
+            MediaItem.kind == "image",
+            MediaItem.phash.is_not(None),
+            MediaItem.deleted_at.is_(None),
+        )
+        .order_by(MediaItem.created_at)
+        .all()
+    )
+    parent = {it.id: it.id for it in imgs}
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i in range(len(imgs)):
+        for j in range(i + 1, len(imgs)):
+            a, b = imgs[i], imgs[j]
+            if media_svc.phash_reliable(a.phash, b.phash, settings.PHASH_MAX_BITS):
+                parent[find(a.id)] = find(b.id)
+
+    clusters: dict[int, list[schemas.MediaOut]] = {}
+    for it in imgs:
+        clusters.setdefault(find(it.id), []).append(schemas.MediaOut.from_item(it))
+    similar = [members for members in clusters.values() if len(members) >= 2]
+    return schemas.DuplicateGroups(groups=groups, similar=similar)
 
 
 @router.patch("/{item_id}", response_model=schemas.MediaOut)

@@ -188,6 +188,7 @@ export default function HomePage({
   });
   const [dupesOpen, setDupesOpen] = useState(false);
   const [dupes, setDupes] = useState<MediaItem[][]>([]);
+  const [similar, setSimilar] = useState<MediaItem[][]>([]);
   const [shareLinkFor, setShareLinkFor] = useState<{ name: string; link: string } | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
 
@@ -696,7 +697,8 @@ export default function HomePage({
   async function openDuplicates() {
     try {
       const res = await listDuplicates();
-      setDupes(res.groups);
+      setDupes(res.groups ?? []);
+      setSimilar(res.similar ?? []);
       setDupesOpen(true);
     } catch (err) {
       setListError(err instanceof Error ? err.message : "Error al buscar duplicados");
@@ -709,7 +711,8 @@ export default function HomePage({
     try {
       await bulkMedia(ids, "purge");
       const res = await listDuplicates();
-      setDupes(res.groups);
+      setDupes(res.groups ?? []);
+      setSimilar(res.similar ?? []);
       await Promise.all([loadItems(0, true), loadCollections()]);
     } catch (err) {
       setListError(err instanceof Error ? err.message : "Error al purgar duplicados");
@@ -1544,9 +1547,11 @@ export default function HomePage({
         <div className="overlay" onClick={() => setDupesOpen(false)}>
           <div className="card dupe-card" onClick={(e) => e.stopPropagation()}>
             <h2>Duplicados por contenido</h2>
-            {dupes.length === 0 && <p className="sub">No hay duplicados. ¡Limpio!</p>}
+            {dupes.length === 0 && similar.length === 0 && (
+              <p className="sub">No hay duplicados. ¡Limpio!</p>
+            )}
             {dupes.map((g, i) => (
-              <div className="dupe-group" key={i}>
+              <div className="dupe-group" key={`exact-${i}`}>
                 <p className="dupe-head">
                   {g.length} copias idénticas ({fmtSize(g[0].size)} cada una)
                 </p>
@@ -1566,6 +1571,27 @@ export default function HomePage({
                 </button>
               </div>
             ))}
+            {similar.length > 0 && (
+              <>
+                <h2>👁 Muy parecidas (visual)</h2>
+                <p className="sub">
+                  Mismo look con bytes distintos (re-descargas, re-saves, compresiones).
+                  Revísalas antes de borrar: el parecido no garantiza que sobren.
+                </p>
+                {similar.map((g, i) => (
+                  <div className="dupe-group" key={`similar-${i}`}>
+                    <p className="dupe-head">{g.length} imágenes muy similares</p>
+                    <ul>
+                      {g.map((it) => (
+                        <li key={it.id}>
+                          {it.title} <span className="muted">· {fmtSize(it.size)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </>
+            )}
             <div className="row">
               <button className="ghost" onClick={() => setDupesOpen(false)}>Cerrar</button>
             </div>

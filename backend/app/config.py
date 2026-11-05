@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     MEDIA_DIR: str = "uploads"
     MAX_UPLOAD_MB: int = 1024
 
+    # Duplicados visuales: distancia hamming máx entre dHashes (imágenes)
+    # para considerarse "gemelos". Subirlo = más laxo, bajarlo = más estricto.
+    PHASH_MAX_BITS: int = 5
+
     # Compresión de VIDEO al subir (ffmpeg H.264): recodifica con CRF fijado,
     # escala a altura máxima y audio AAC. Borra el original SOLO si el
     # resultado pesa menos. El botón "Comprimir" del detalle reusa lo mismo.

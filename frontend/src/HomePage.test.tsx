@@ -27,7 +27,7 @@ vi.mock("./lib/api", () => ({
   uploadMedia: vi.fn(),
   updateMe: vi.fn(),
   exportUrl: () => "http://fake/export",
-  listDuplicates: vi.fn(async () => ({ groups: [] })),
+  listDuplicates: vi.fn(async () => ({ groups: [], similar: [] })),
   bulkMedia: vi.fn(),
   restoreMedia: vi.fn(),
   purgeMedia: vi.fn(),

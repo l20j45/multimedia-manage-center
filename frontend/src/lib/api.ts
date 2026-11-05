@@ -271,7 +271,10 @@ export function purgeMedia(id: number): Promise<void> {
   return request(`/media/${id}/purge`, { method: "DELETE" });
 }
 
-export function listDuplicates(): Promise<{ groups: MediaItem[][] }> {
+export function listDuplicates(): Promise<{
+  groups: MediaItem[][];  // copias byte-identicals (sha256)
+  similar: MediaItem[][]; // gemelos visuales (phash; solo mirar antes de borrar)
+}> {
   return request("/media/duplicates");
 }
 

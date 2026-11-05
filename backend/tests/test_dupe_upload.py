@@ -34,7 +34,7 @@ def test_upload_duplicado_responde_duplicate_of() -> None:
     assert {i["id"] for i in dupes["groups"][0]} == {first.json()["id"], second.json()["id"]}
 
 
-def test_backfill_sha256_rescata_legacy() -> None:
+def test_backfill_hashes_rescata_legacy() -> None:
     """Item sin sha256 (uploads pre-hash) → backfill lo calcula del fichero."""
     token = register_and_login("backfill")
     files = {"file": ("x.png", make_png(), "image/png")}
@@ -55,7 +55,7 @@ def test_backfill_sha256_rescata_legacy() -> None:
     db.commit()
     db.close()
 
-    n = media_svc.backfill_sha256()
+    n = media_svc.backfill_hashes()
     assert n >= 1
     db = SessionLocal()
     row = db.query(MediaItem).filter(MediaItem.id == item["id"]).first()

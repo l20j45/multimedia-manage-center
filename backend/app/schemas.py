@@ -217,7 +217,8 @@ class StatOut(BaseModel):
 
 
 class DuplicateGroups(BaseModel):
-    groups: list[list[MediaOut]]
+    groups: list[list[MediaOut]]  # bytes idénticos (sha256)
+    similar: list[list[MediaOut]] = []  # gemelos visuales (phash)
 
 
 class TagCount(BaseModel):

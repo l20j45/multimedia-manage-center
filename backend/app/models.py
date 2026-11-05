@@ -64,6 +64,9 @@ class MediaItem(Base):
     mime: Mapped[str] = mapped_column(String(100), nullable=False)
     size: Mapped[int] = mapped_column(nullable=False)  # bytes
     sha256: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)  # duplicados
+    # Hash PERCEPTUAL (dHash 64 bits como hex): imágenes "iguales a la vista"
+    # aunque los bytes difieran (re-save, re-compress). null si no es imagen.
+    phash: Mapped[str | None] = mapped_column(String(16), index=True, nullable=True)
     duration_s: Mapped[float | None] = mapped_column(nullable=True)  # audio/video (ffprobe)
     visibility: Mapped[str] = mapped_column(
         String(10), index=True, default="private", server_default="private"

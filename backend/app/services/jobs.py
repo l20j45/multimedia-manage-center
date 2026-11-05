@@ -127,6 +127,7 @@ def _compress_image(job_id: str, item: Any, db: Any) -> None:
             Path(comp[0]).suffix.lower(), item.mime
         )
         item.thumb_path = media_svc.make_thumbnail(item.path, "image")
+        item.phash = media_svc.phash_image(media_svc.media_root() / item.path)
         db.commit()
         _set(job_id, new_size=comp[1])
     else:
