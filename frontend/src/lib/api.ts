@@ -272,6 +272,11 @@ export function rethumbMedia(
   });
 }
 
+/** Comprime un video (H.264 + escala máx altura + AAC). Devuelve el item actualizado (o igual si no redujo). */
+export function compressMedia(id: number): Promise<MediaItem> {
+  return request(`/media/${id}/compress`, { method: "POST" });
+}
+
 export function exportUrl(id: number, format: "txt" | "csv" = "txt"): string {
   const token = getToken() ?? "";
   return `${API_BASE}/collections/${id}/export?format=${format}&access_token=${encodeURIComponent(token)}`;

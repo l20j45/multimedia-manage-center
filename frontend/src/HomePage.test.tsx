@@ -32,6 +32,7 @@ vi.mock("./lib/api", () => ({
   restoreMedia: vi.fn(),
   purgeMedia: vi.fn(),
   rethumbMedia: vi.fn(),
+  compressMedia: vi.fn(),
   createCollection: vi.fn(),
 }));
 

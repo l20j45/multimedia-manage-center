@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     MEDIA_DIR: str = "uploads"
     MAX_UPLOAD_MB: int = 1024
 
+    # Compresión de VIDEO al subir (ffmpeg H.264): recodifica con CRF fijado,
+    # escala a altura máxima y audio AAC. Borra el original SOLO si el
+    # resultado pesa menos. El botón "Comprimir" del detalle reusa lo mismo.
+    COMPRESS_ENABLED: bool = True
+    COMPRESS_CRF: int = 26
+    COMPRESS_MAX_HEIGHT: int = 1080
+    COMPRESS_AUDIO_KBPS: int = 128
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

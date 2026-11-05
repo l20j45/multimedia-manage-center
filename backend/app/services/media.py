@@ -323,6 +323,66 @@ def probe_duration(rel_path: str, kind: str) -> float | None:
         return None
 
 
+def compress_video(rel_path: str) -> tuple[str, int, bool] | None:
+    """Comprime un VIDEO: H.264 (COMPRESS_CRF) + escala a COMPRESS_MAX_HEIGHT
+    + audio AAC (COMPRESS_AUDIO_KBPS) + faststart (sirve bien por web).
+
+    Devuelve (ruta_final_rel, size_final, reemplazo) o None si no hay ffmpeg/
+    falló:
+      - reemplazo=True: el comprimido pesa MENOS → borra el original,
+        la ruta final es la del comprimido (quien llama actualiza la BD).
+      - reemplazo=False: NO convivió → borra el comprimido y devuelve la
+        ruta original intacta (no tocar nada).
+    """
+    ff = ffmpeg_bin()
+    if not ff:
+        return None
+    root = media_root()
+    src = root / rel_path
+    if not src.exists():
+        return None
+    dst_name = f"{Path(rel_path).stem}_c{uuid.uuid4().hex[:6]}.mp4"
+    dst_abs = src.parent / dst_name
+    cmd = [
+        ff,
+        "-loglevel",
+        "error",
+        "-i",
+        str(src),
+        "-c:v",
+        "libx264",
+        "-crf",
+        str(settings.COMPRESS_CRF),
+        "-preset",
+        "medium",
+        "-vf",
+        f"scale=-2:'min({settings.COMPRESS_MAX_HEIGHT},ih)'",
+        "-c:a",
+        "aac",
+        "-b:a",
+        f"{settings.COMPRESS_AUDIO_KBPS}k",
+        "-movflags",
+        "+faststart",
+        "-y",
+        str(dst_abs),
+    ]
+    try:
+        # videos largos pueden tardar; 1h de margen (timeout generoso)
+        subprocess.run(cmd, timeout=3600, check=True, capture_output=True)
+    except Exception:  # noqa: BLE001 - compresión es best-effort
+        dst_abs.unlink(missing_ok=True)
+        return None
+    if not dst_abs.exists() or dst_abs.stat().st_size == 0:
+        dst_abs.unlink(missing_ok=True)
+        return None
+    new_size = dst_abs.stat().st_size
+    if new_size < src.stat().st_size:
+        src.unlink(missing_ok=True)
+        return str(Path(rel_path).parent / dst_name), new_size, True
+    dst_abs.unlink(missing_ok=True)
+    return rel_path, src.stat().st_size, False
+
+
 def delete_files(rel_paths: list[str | None]) -> None:
     """Borra ficheros físicos (best-effort): main + thumbs de un item."""
     for rel in rel_paths:

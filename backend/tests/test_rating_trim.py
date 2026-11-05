@@ -46,8 +46,10 @@ def test_rating_patch_filtro_y_orden() -> None:
 
 
 @pytest.mark.skipif(media_svc.ffmpeg_bin() is None, reason="ffmpeg no disponible")
-def test_trim_video_fragmento() -> None:
+def test_trim_video_fragmento(monkeypatch) -> None:
     token = register_and_login("trim")
+    # trim de trim: sin auto-compresión el ratio de bytes depende solo del copy
+    monkeypatch.setattr(settings, "COMPRESS_ENABLED", False)
     tmp = Path(settings.MEDIA_DIR) / "_t.mp4"
     tmp.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(

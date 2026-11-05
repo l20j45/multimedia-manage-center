@@ -12,6 +12,7 @@ vi.mock("./lib/api", () => ({
   updateMedia: (...args: unknown[]) => updateMedia(...(args as [])),
   mediaUrl: () => "http://fake/file",
   rethumbMedia: vi.fn(),
+  compressMedia: vi.fn(),
   trimMedia: vi.fn(),
   extractAudio: vi.fn(),
 }));

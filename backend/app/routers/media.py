@@ -26,6 +26,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app import schemas
+from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import Collection, CollectionItem, MediaItem, User
@@ -76,6 +77,12 @@ def upload(
     rel_path, size, mime, sha = media_svc.save_stream(
         file.file, original, user.id, file.content_type
     )
+    # Compresión automática de video (configurable en .env; best-effort).
+    if kind == "video" and settings.COMPRESS_ENABLED:
+        comp = media_svc.compress_video(rel_path)
+        if comp:
+            rel_path, size = comp[0], comp[1]
+            mime = "video/mp4"
     camera, fecha_orig = media_svc.exif_meta(media_svc.media_root() / rel_path, mime)
     meta_fields: dict | None = None
     if camera or fecha_orig:
@@ -433,6 +440,35 @@ def rethumb(
     item.thumb_path = thumb
     db.commit()
     db.refresh(item)
+    return schemas.MediaOut.from_item(item)
+
+
+@router.post("/{item_id}/compress", response_model=schemas.MediaOut)
+def compress_item(
+    item_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> schemas.MediaOut:
+    """Comprime un video (H.264 crf + escala máx altura + AAC).
+
+    Best-effort: si el resultado NO pesa menos, se conserva el original y
+    se devuelve el item sin cambios (200). Si convive, se reemplaza
+    path/size/mime y se regeneran duración y thumbnail. 503 sin ffmpeg.
+    """
+    item = _owned_item(db, user, item_id)
+    if item.kind != "video":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="Solo los videos se pueden comprimir"
+        )
+    comp = media_svc.compress_video(item.path)
+    if not comp:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="ffmpeg no disponible")
+    if comp[2]:  # pesa menos → swap en BD (el original ya lo borró el servicio)
+        item.path, item.size, item.mime = comp[0], comp[1], "video/mp4"
+        item.duration_s = media_svc.probe_duration(item.path, "video")
+        item.thumb_path = media_svc.make_thumbnail(item.path, "video")
+        db.commit()
+        db.refresh(item)
     return schemas.MediaOut.from_item(item)
 
 

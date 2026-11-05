@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  compressMedia,
   extractAudio,
   mediaUrl,
   rethumbMedia,
@@ -53,6 +54,7 @@ export default function DetailPanel({
   onNavigate?: (dir: 1 | -1) => void;
 }) {
   const [extracting, setExtracting] = useState(false);
+  const [compressing, setCompressing] = useState(false);
   const [cur, setCur] = useState(item);
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState(item.title);
@@ -143,6 +145,22 @@ export default function DetailPanel({
     }
   }
 
+  async function doCompress() {
+    setCompressing(true);
+    setError("");
+    try {
+      const updated = await compressMedia(cur.id);
+      const shrunk = updated.size < cur.size;
+      setCur(updated);
+      onChanged(updated);
+      if (shrunk) videoRef.current?.load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al comprimir");
+    } finally {
+      setCompressing(false);
+    }
+  }
+
   function addTags(raw: string): string[] {
     const clean = raw.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
     const next = [...new Set([...cur.tags, ...clean])];
@@ -206,6 +224,16 @@ export default function DetailPanel({
             {cur.kind === "video" && (
               <button className="ghost" onClick={doExtractAudio} disabled={extracting} title="Extrae la pista de audio como mp3 nuevo (para tu flujo SFX)">
                 {extracting ? "Extrayendo…" : "🎧 Extraer audio"}
+              </button>
+            )}
+            {cur.kind === "video" && (
+              <button
+                className="ghost"
+                onClick={doCompress}
+                disabled={compressing}
+                title="Re-encodea a H.264 y baja la resolución al máx altura configurado; ahorra espacio sin pérdida visible"
+              >
+                {compressing ? "Comprimiendo…" : "🗜 Comprimir"}
               </button>
             )}
             <button
