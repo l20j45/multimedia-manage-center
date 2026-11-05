@@ -5,7 +5,7 @@ description = "App Biblioteca de Recursos Multimedia construida con Tauri"
 edition = "2021"
 
 [lib]
-name = "biblioteca-recursos-multimedia_lib"
+name = "biblioteca_recursos_multimedia_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

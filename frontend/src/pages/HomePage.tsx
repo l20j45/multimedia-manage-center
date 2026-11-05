@@ -21,6 +21,7 @@ import {
   purgeMedia,
   removeCollectionItem,
   restoreMedia,
+  jobStatus,
   setGeminiKey,
   sha256OfFile,
   shareLink,
@@ -98,7 +99,7 @@ export default function HomePage({
 
   // Subida
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [title, setTitle] = useState("");
   const [tagsText, setTagsText] = useState("");
   const [description, setDescription] = useState("");
@@ -106,6 +107,9 @@ export default function HomePage({
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
   const [uploadMsg, setUploadMsg] = useState("");
+
+  // Compresión en background: items con job activo (poll cada 3s → notificación)
+  const [compressJobs, setCompressJobs] = useState<number[]>([]);
 
   // Drag & drop
   const [dragging, setDragging] = useState(false);
@@ -116,6 +120,39 @@ export default function HomePage({
     setToasts((prev) => [...prev, { id, msg }]);
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4500);
   }
+
+  function trackJob(itemId: number): void {
+    setCompressJobs((prev) => (prev.includes(itemId) ? prev : [...prev, itemId]));
+  }
+
+  // Poll para los jobs de compresión en background: al terminar (o fallar)
+  // suelta el item y lanza la notificación tipo toast.
+  useEffect(() => {
+    if (compressJobs.length === 0) return;
+    const timer = setInterval(async () => {
+      for (const itemId of compressJobs) {
+        try {
+          const st = await jobStatus(itemId);
+          if (st.status === "done") {
+            setCompressJobs((prev) => prev.filter((id) => id !== itemId));
+            toast(
+              st.new_size !== null && st.old_size !== null && st.new_size < st.old_size
+                ? `🗜 compresión lista: ${fmtSize(st.old_size)} → ${fmtSize(st.new_size)}`
+                : "🗜 compresión lista (el original ya era compacto — sin cambios)",
+            );
+            await loadItems(0, true);
+          } else if (st.status === "failed") {
+            setCompressJobs((prev) => prev.filter((id) => id !== itemId));
+            toast(`⚠ compresión falló: ${st.error ?? "error desconocido"}`);
+          }
+        } catch {
+          setCompressJobs((prev) => prev.filter((id) => id !== itemId));
+        }
+      }
+    }, 3000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compressJobs]);
 
   // Auto-tag sugerencias (nunca se aplican solas)
   const [suggestions, setSuggestions] = useState<{
@@ -375,34 +412,84 @@ export default function HomePage({
     }
   }
 
+  async function postUploadRefresh(): Promise<void> {
+    await Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
+  }
+
+  /** Sube varios archivos en fila aplicando tags/desc/visibilidad compartidos.
+   *  Título siempre = nombre del fichero. Registra jobs de compresión. */
+  async function uploadMany(
+    files: File[],
+    onTick: (doneIndex: number, pctFile: number) => void,
+    shared?: { tags: string; description: string },
+  ): Promise<{ done: number; failed: number }> {
+    let done = 0;
+    let failed = 0;
+    for (const [i, f] of files.entries()) {
+      try {
+        const up = await uploadMedia(
+          f,
+          f.name.replace(/\.[^.]+$/, ""),
+          shared?.tags ?? "",
+          (pct) => onTick(i, pct),
+          { description: shared?.description ?? "", visibility },
+        );
+        if (up.compress_job_id) trackJob(up.id);
+        done += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    return { done, failed };
+  }
+
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
-    if (!file) return;
+    if (selectedFiles.length === 0) return;
     setUploadMsg("");
     setUploading(true);
     setUploadPct(0);
     try {
-      const up = await uploadMedia(file, title, tagsText, setUploadPct, { description, visibility });
-      setFile(null);
+      if (selectedFiles.length === 1) {
+        const up = await uploadMedia(selectedFiles[0], title, tagsText, setUploadPct, {
+          description,
+          visibility,
+        });
+        if (up.compress_job_id) trackJob(up.id);
+        await postUploadRefresh();
+        getAutotagSuggestions(up.id)
+          .then((r) => {
+            if (r.suggestions.length > 0) {
+              setSuggestions({
+                id: up.id,
+                title: up.title,
+                baseTags: (up.tags ?? []).slice(),
+                suggestions: r.suggestions,
+                source: r.source,
+              });
+            }
+          })
+          .catch(() => {});
+      } else {
+        const { done, failed } = await uploadMany(
+          selectedFiles,
+          (doneIdx, pctFile) =>
+            setUploadPct(((doneIdx + pctFile / 100) / selectedFiles.length) * 100),
+          { tags: tagsText, description },
+        );
+        toast(
+          failed === 0
+            ? `${done} archivo(s) subidos`
+            : `${done} subidos · ${failed} fallidos`,
+        );
+        await postUploadRefresh();
+      }
+      setSelectedFiles([]);
       setTitle("");
       setTagsText("");
       setDescription("");
       if (fileInput.current) fileInput.current.value = "";
       setUploadOpen(false);
-      await Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
-      getAutotagSuggestions(up.id)
-        .then((r) => {
-          if (r.suggestions.length > 0) {
-            setSuggestions({
-              id: up.id,
-              title: up.title,
-              baseTags: (up.tags ?? []).slice(),
-              suggestions: r.suggestions,
-              source: r.source,
-            });
-          }
-        })
-        .catch(() => {});
     } catch (err) {
       setUploadMsg(err instanceof Error ? err.message : "Error al subir");
     } finally {
@@ -416,24 +503,14 @@ export default function HomePage({
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length === 0) return;
     if (files.length === 1) {
-      setFile(files[0]);
+      setSelectedFiles(files);
       setTitle(files[0].name.replace(/\.[^.]+$/, ""));
       setUploadOpen(true);
       return;
     }
-    
-    let done = 0;
-    let failed = 0;
-    for (const f of files) {
-      try {
-        await uploadMedia(f, f.name.replace(/\.[^.]+$/, ""), "", undefined, { visibility });
-        done += 1;
-      } catch {
-        failed += 1;
-      }
-    }
+    const { done, failed } = await uploadMany(files, () => {});
     toast(failed === 0 ? `${done} archivo(s) subidos` : `${done} subidos · ${failed} fallidos`);
-    await Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
+    await postUploadRefresh();
   }
 
   async function doQuickUpload(f: File) {
@@ -450,6 +527,7 @@ export default function HomePage({
         }
       }
       const up = await uploadMedia(f, f.name.replace(/\.[^.]+$/, ""), "", undefined, { visibility });
+      if (up.compress_job_id) trackJob(up.id);
       toast(`📋 pegado y subido: ${f.name}`);
       await Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
       getAutotagSuggestions(up.id)
@@ -1243,6 +1321,7 @@ export default function HomePage({
             toast(`🎧 audio extraído: ${frag.title} — ábrelo y recorta tu SFX con I/O`);
             Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
           }}
+          onCompressQueued={(itemId: number) => trackJob(itemId)}
         />
       )}
 
@@ -1324,13 +1403,22 @@ export default function HomePage({
             <input
               type="file"
               ref={fileInput}
+              multiple
               accept="image/*,audio/*,video/*"
               onChange={(e) => {
-                const f = e.target.files?.[0] ?? null;
-                setFile(f);
-                if (f && !title.trim()) setTitle(f.name.replace(/\.[^.]+$/, ""));
+                const fs = Array.from(e.target.files ?? []);
+                setSelectedFiles(fs);
+                if (fs.length === 1 && !title.trim()) {
+                  setTitle(fs[0].name.replace(/\.[^.]+$/, ""));
+                }
               }}
             />
+            {selectedFiles.length > 1 && (
+              <p className="sub">
+                {selectedFiles.length} archivos: se suben con su nombre como título y comparten
+                tags/descripción/visibilidad. Los videos se comprimen en background.
+              </p>
+            )}
             <p className="label">Título</p>
             <input placeholder="Título del recurso" value={title} onChange={(e) => setTitle(e.target.value)} />
             <p className="label">Tags (separados por coma)</p>
@@ -1357,8 +1445,12 @@ export default function HomePage({
               <button type="button" className="ghost" onClick={() => setUploadOpen(false)}>
                 Cancelar
               </button>
-              <button className="primary" disabled={!file || uploading}>
-                {uploading ? "Subiendo..." : "Subir"}
+              <button className="primary" disabled={selectedFiles.length === 0 || uploading}>
+                {uploading
+                  ? "Subiendo..."
+                  : selectedFiles.length > 1
+                    ? `Subir ${selectedFiles.length} archivos`
+                    : "Subir"}
               </button>
             </div>
           </form>

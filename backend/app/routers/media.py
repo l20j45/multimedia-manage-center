@@ -30,6 +30,7 @@ from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import Collection, CollectionItem, MediaItem, User
+from app.services import jobs as jobs_svc
 from app.services import media as media_svc
 
 router = APIRouter(prefix="/media", tags=["media"])
@@ -77,12 +78,6 @@ def upload(
     rel_path, size, mime, sha = media_svc.save_stream(
         file.file, original, user.id, file.content_type
     )
-    # Compresión automática de video (configurable en .env; best-effort).
-    if kind == "video" and settings.COMPRESS_ENABLED:
-        comp = media_svc.compress_video(rel_path)
-        if comp:
-            rel_path, size = comp[0], comp[1]
-            mime = "video/mp4"
     camera, fecha_orig = media_svc.exif_meta(media_svc.media_root() / rel_path, mime)
     meta_fields: dict | None = None
     if camera or fecha_orig:
@@ -111,7 +106,13 @@ def upload(
     db.add(item)
     db.commit()
     db.refresh(item)
-    return schemas.MediaOut.from_item(item)
+    # Compresión automática en background (cola; el item arriba ya es válido).
+    job_id = None
+    if kind == "video" and settings.COMPRESS_ENABLED and media_svc.ffmpeg_bin():
+        job_id = jobs_svc.enqueue_compress(item.id)
+    payload = schemas.MediaOut.from_item(item)
+    payload.compress_job_id = job_id
+    return payload
 
 
 @router.get("", response_model=schemas.MediaList)
@@ -443,33 +444,47 @@ def rethumb(
     return schemas.MediaOut.from_item(item)
 
 
-@router.post("/{item_id}/compress", response_model=schemas.MediaOut)
+@router.post(
+    "/{item_id}/compress",
+    response_model=schemas.CompressJobOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 def compress_item(
     item_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> schemas.MediaOut:
-    """Comprime un video (H.264 crf + escala máx altura + AAC).
+) -> schemas.CompressJobOut:
+    """Comprime un video EN BACKGROUND (cola): responde 202 al toque.
 
-    Best-effort: si el resultado NO pesa menos, se conserva el original y
-    se devuelve el item sin cambios (200). Si convive, se reemplaza
-    path/size/mime y se regeneran duración y thumbnail. 503 sin ffmpeg.
+    El original se reemplaza solo si el resultado pesa menos. Cuando
+    termina, consulta el estado en GET /media/jobs/latest/{item_id}
+    (o el job_id devuelto). 503 sin ffmpeg.
     """
     item = _owned_item(db, user, item_id)
     if item.kind != "video":
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, detail="Solo los videos se pueden comprimir"
         )
-    comp = media_svc.compress_video(item.path)
-    if not comp:
+    if not media_svc.ffmpeg_bin():
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="ffmpeg no disponible")
-    if comp[2]:  # pesa menos → swap en BD (el original ya lo borró el servicio)
-        item.path, item.size, item.mime = comp[0], comp[1], "video/mp4"
-        item.duration_s = media_svc.probe_duration(item.path, "video")
-        item.thumb_path = media_svc.make_thumbnail(item.path, "video")
-        db.commit()
-        db.refresh(item)
-    return schemas.MediaOut.from_item(item)
+    job_id = jobs_svc.enqueue_compress(item.id)
+    return schemas.CompressJobOut(job_id=job_id, status="queued")
+
+
+@router.get("/jobs/latest/{item_id}", response_model=schemas.JobOut)
+def job_latest(
+    item_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> schemas.JobOut:
+    """Estado del último job de compresión del item (polling del cliente)."""
+    item = _owned_item(db, user, item_id)
+    job = jobs_svc.latest_job(item.id)
+    if not job:
+        return schemas.JobOut(
+            job_id="", item_id=item.id, status="none", new_size=item.size
+        )
+    return schemas.JobOut(**job)
 
 
 @router.post("/{item_id}/restore", response_model=schemas.MediaOut)

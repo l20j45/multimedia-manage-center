@@ -87,6 +87,8 @@ class MediaOut(BaseModel):
     rating: int
     deleted: bool
     created_at: datetime
+    # job de compresión en background (solo videos con auto-compress activo)
+    compress_job_id: str | None = None
 
     @classmethod
     def from_item(cls, item: MediaItem) -> MediaOut:
@@ -152,6 +154,20 @@ class BulkRequest(BaseModel):
 class BulkResult(BaseModel):
     done: int
     requested: int
+
+
+class CompressJobOut(BaseModel):
+    job_id: str
+    status: str = "queued"
+
+
+class JobOut(BaseModel):
+    job_id: str
+    item_id: int
+    status: str  # none|queued|running|done|failed
+    old_size: int | None = None
+    new_size: int | None = None
+    error: str | None = None
 
 
 class RethumbIn(BaseModel):

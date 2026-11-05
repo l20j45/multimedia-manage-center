@@ -44,6 +44,7 @@ export default function DetailPanel({
   onTrimCreated,
   onCreated,
   onNavigate,
+  onCompressQueued,
 }: {
   item: MediaItem;
   onClose: () => void;
@@ -52,9 +53,11 @@ export default function DetailPanel({
   onTrimCreated: (frag: MediaItem) => void;
   onCreated?: (item: MediaItem) => void;
   onNavigate?: (dir: 1 | -1) => void;
+  onCompressQueued?: (itemId: number) => void;
 }) {
   const [extracting, setExtracting] = useState(false);
   const [compressing, setCompressing] = useState(false);
+  const [notice, setNotice] = useState("");
   const [cur, setCur] = useState(item);
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState(item.title);
@@ -148,12 +151,11 @@ export default function DetailPanel({
   async function doCompress() {
     setCompressing(true);
     setError("");
+    setNotice("");
     try {
-      const updated = await compressMedia(cur.id);
-      const shrunk = updated.size < cur.size;
-      setCur(updated);
-      onChanged(updated);
-      if (shrunk) videoRef.current?.load();
+      await compressMedia(cur.id); // 202: encola y responde, no espera ffmpeg
+      setNotice("🗜 Compresión en background… te avisamos cuando termine.");
+      onCompressQueued?.(cur.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al comprimir");
     } finally {
@@ -233,7 +235,7 @@ export default function DetailPanel({
                 disabled={compressing}
                 title="Re-encodea a H.264 y baja la resolución al máx altura configurado; ahorra espacio sin pérdida visible"
               >
-                {compressing ? "Comprimiendo…" : "🗜 Comprimir"}
+                {compressing ? "En cola…" : "🗜 Comprimir"}
               </button>
             )}
             <button
@@ -329,13 +331,14 @@ export default function DetailPanel({
           </div>
 
           {error && <p className="error">{error}</p>}
+          {notice && <p className="sub">{notice}</p>}
         </div>
 
         {/* ---------- panel derecho: CONTENIDO + NOTAS ---------- */}
         <div className="detail-content">
           <div className="detail-preview">
             {cur.kind === "video" && (
-              <video controls src={mediaUrl(cur.id, "file")} ref={videoRef} />
+              <video key={cur.path} controls src={mediaUrl(cur.id, "file")} ref={videoRef} />
             )}
             {cur.kind === "audio" && <audio controls src={mediaUrl(cur.id, "file")} />}
             {cur.kind === "image" && <img src={mediaUrl(cur.id, "file")} alt={cur.title} />}

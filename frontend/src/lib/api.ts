@@ -119,6 +119,18 @@ export interface MediaItem {
   rating: number;
   deleted: boolean;
   created_at: string;
+  /** Job de compresión en background (solo videos; el cliente polla el estado) */
+  compress_job_id?: string | null;
+}
+
+/** Estado del último job de compresión de un item. */
+export interface JobStatus {
+  job_id: string;
+  item_id: number;
+  status: "none" | "queued" | "running" | "done" | "failed";
+  old_size: number | null;
+  new_size: number | null;
+  error: string | null;
 }
 
 export interface MediaList {
@@ -272,9 +284,15 @@ export function rethumbMedia(
   });
 }
 
-/** Comprime un video (H.264 + escala máx altura + AAC). Devuelve el item actualizado (o igual si no redujo). */
-export function compressMedia(id: number): Promise<MediaItem> {
+/** Comprime un video EN BACKGROUND: devuelve {job_id} al toque (202).
+ *  El estado se consulta con jobStatus(itemId) hasta done|failed. */
+export function compressMedia(id: number): Promise<{ job_id: string }> {
   return request(`/media/${id}/compress`, { method: "POST" });
+}
+
+/** Estado del último job de compresión del item (queued/running/done/failed). */
+export function jobStatus(itemId: number): Promise<JobStatus> {
+  return request(`/media/jobs/latest/${itemId}`);
 }
 
 export function exportUrl(id: number, format: "txt" | "csv" = "txt"): string {
