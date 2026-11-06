@@ -317,16 +317,55 @@ Se generan automáticamente para las 3 plataformas (`icon.ico`, `icon.icns`, PNG
 Para usar tu propio logo: `pnpm run tauri icon ruta/mi-logo-1024.png` y listo
 (regenera todos los formatos).
 
+## Roles: super admin, registro y equipos
+
+- **Super admin**: el **primer usuario registrado** queda automáticamente como
+  super admin (`users.is_admin`). En instalaciones previas a esta función, la
+  migración `0009` promovió al usuario más antiguo.
+- Desde el sidebar (sección **Gestión**) el admin puede:
+  - **🛡 Administración**: ver TODOS los usuarios (total / activos),
+    activar/desactivar cuentas, promover o retirar admins (con guardas:
+    no puede desactivarse a sí mismo ni dejar la instalación sin admin) y
+    **abrir/cerrar el registro** de cuentas nuevas (instancia "solo por
+    invitación"). Con el registro cerrado, la pantalla de login oculta el
+    tab «Crear cuenta» y la API responde 403 en `/auth/register`.
+  - **👥 Equipos**: crear equipos, invitar por correo a usuarios YA
+    registrados, quitar miembros, salir o disolver equipos.
+- **Visibilidad por equipo**: al subir/editar un recurso puedes dejarlo
+  *Privado* (solo tú), *Del equipo → Todos mis equipos* (lo ven los miembros
+  de los equipos en que estás) o *Del equipo → Solo: N* (lo ven únicamente
+  los miembros de ese equipo concreto). Fuera del estado de admin, esto
+  comparte SOLO lectura: nadie más puede editar o borrar tus recursos.
+
+## Rate limiting
+
+Los endpoints sensibles están limitados por IP (ventana de 60 s, config en
+`backend/.env` con `RATE_LIMIT_*`): login 10/min, registro y recuperación
+5/min, `/admin` 30/min y `/teams` 60/min.
+
 ## Endpoints principales
 
 | método | Ruta                  | Descripción                                             |
 |--------|-----------------------|---------------------------------------------------------|
 | GET    | /health               | Estado de la API                                        |
-| POST   | /auth/register        | Crear cuenta (envía correo de bienvenida)               |
+| GET    | /auth/registration    | ¿Registro abierto? (público; la UI adapta su tab)       |
+| POST   | /auth/register        | Crear cuenta (el PRIMER usuario queda como super admin) |
 | POST   | /auth/login           | Login → token JWT                                       |
 | GET    | /auth/me              | Perfil del usuario autenticado                          |
 | POST   | /auth/forgot-password | Pide el código de recuperación (respuesta 204 neutra)   |
 | POST   | /auth/reset-password  | Cambia la contraseña con el código de 6 dígitos         |
 | PATCH  | /users/me             | Actualizar nombre / contraseña                          |
+| GET    | /admin/overview       | (admin) usuarios + conteos + estado del registro        |
+| PATCH  | /admin/users/{id}     | (admin) activar/desactivar, promover/retirar admin      |
+| PUT    | /admin/registration   | (admin) cerrar/abrir el registro                        |
+| GET/POST | /teams              | Equipos del usuario / crear equipo                      |
+| GET    | /teams/{id}           | Miembros del equipo (y sus roles)                       |
+| POST   | /teams/{id}/members   | Invitar por correo (requiere dueño del equipo)          |
+| DELETE | /teams/{id}/leave     | Salir del equipo                                        |
+| DELETE | /teams/{id}/members/{uid} | Quitar miembro                                     |
+| DELETE | /teams/{id}           | Disolver el equipo                                      |
+
+Backups y migraciones (incluye roles y equipos, que viven en la BD):
+`docs/db-migraciones-y-backups.md`
 
 © 2026 — Biblioteca de Recursos Multimedia
