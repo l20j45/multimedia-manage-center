@@ -18,6 +18,7 @@ vi.mock("./lib/api", () => ({
   listTags: () => listTags(),
   listCollections: () => listCollections(),
   addCollectionItem: (...args: unknown[]) => addCollectionItem(...(args as [])),
+  listTeams: vi.fn(async () => []),
   removeCollectionItem: vi.fn(),
   deleteCollection: vi.fn(),
   collectionItems: vi.fn(),

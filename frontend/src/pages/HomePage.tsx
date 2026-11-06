@@ -18,6 +18,7 @@ import {
   listDuplicates,
   listMedia,
   listTags,
+  listTeams,
   mediaUrl,
   purgeMedia,
   removeCollectionItem,
@@ -35,9 +36,12 @@ import {
   type MediaKind,
   type MediaQuery,
   type StatOut,
+  type Team,
   type User,
 } from "../lib/api";
 import DetailPanel from "./DetailPanel";
+import AdminPanel from "./AdminPanel";
+import TeamsPanel from "./TeamsPanel";
 
 type NavKey = "all" | MediaKind | "trash" | "collections" | "stats";
 
@@ -106,6 +110,9 @@ export default function HomePage({
   const [tagsText, setTagsText] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<"private" | "team">("private");
+  // Equipo concreto para la subida ("" = abierto a todos mis equipos)
+  const [uploadTeamId, setUploadTeamId] = useState("");
+  const [myTeams, setMyTeams] = useState<Team[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
   const [uploadMsg, setUploadMsg] = useState("");
@@ -191,6 +198,7 @@ export default function HomePage({
     camera: "",
     proyecto: "",
     visibility: "private" as "private" | "team",
+    teamId: null as number | null,
   });
   const [dupesOpen, setDupesOpen] = useState(false);
   const [dupes, setDupes] = useState<MediaItem[][]>([]);
@@ -203,6 +211,10 @@ export default function HomePage({
   const [name, setName] = useState(user.name ?? "");
   const [busy, setBusy] = useState(false);
   const [profileError, setProfileError] = useState("");
+
+  // Gestión (admin/equipos)
+  const [teamsOpen, setTeamsOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
 
   // Servidor (dirección del backend): clave para APK / oficina
   const [apiBase, setApiBaseState] = useState(getApiBase());
@@ -369,6 +381,7 @@ export default function HomePage({
       camera: item.meta?.camera ?? "",
       proyecto: item.meta?.proyecto ?? "",
       visibility: item.visibility ?? "private",
+      teamId: (item.team_id ?? null) as number | null,
     });
   }
 
@@ -386,6 +399,12 @@ export default function HomePage({
         description: editDraft.description,
         meta,
         visibility: editDraft.visibility,
+        ...(editDraft.visibility === "team"
+          ? {
+              team_all: editDraft.teamId === null,
+              team_id: editDraft.teamId ?? undefined,
+            }
+          : {}),
       });
       setEditing(null);
       await Promise.all([loadItems(0, true), loadTags()]);
@@ -458,7 +477,11 @@ export default function HomePage({
           f.name.replace(/\.[^.]+$/, ""),
           shared?.tags ?? "",
           (pct) => onTick(i, pct),
-          { description: shared?.description ?? "", visibility },
+          {
+            description: shared?.description ?? "",
+            visibility,
+            teamId: visibility === "team" && uploadTeamId ? Number(uploadTeamId) : null,
+          },
         );
         if (up.compress_job_id) trackJob(up.id);
         if (up.duplicate_of) dups += 1;
@@ -482,6 +505,7 @@ export default function HomePage({
         const up = await uploadMedia(selectedFiles[0], title, tagsText, setUploadPct, {
           description,
           visibility,
+          teamId: visibility === "team" && uploadTeamId ? Number(uploadTeamId) : null,
         });
         if (up.compress_job_id) trackJob(up.id);
         if (up.duplicate_of) {
@@ -813,6 +837,12 @@ export default function HomePage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadOpen, editing, addItemFor, profileOpen, dupesOpen, detail, visibility]);
 
+  // Equipos: para el selector "compartir con…" en subida y edición
+  useEffect(() => {
+    if (teamsOpen) return; // TeamsPanel los carga por su cuenta
+    listTeams().then(setMyTeams).catch(() => setMyTeams([]));
+  }, [teamsOpen]);
+
   async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault();
     setProfileError("");
@@ -909,6 +939,18 @@ export default function HomePage({
           ))}
         </div>
 
+        <div className="snav-section">
+          <p className="snav-label">Gestión</p>
+          <button className="snav-item" onClick={() => setTeamsOpen(true)}>
+            👥 Equipos
+          </button>
+          {user.is_admin && (
+            <button className="snav-item" onClick={() => setAdminOpen(true)}>
+              🛡Administración
+            </button>
+          )}
+        </div>
+
         <div className="snav-bottom">
           <button className="snav-item" onClick={() => setHelpOpen(true)}>
             ⌨️ Atajos
@@ -918,6 +960,11 @@ export default function HomePage({
           </button>
           <button className="snav-item" onClick={() => setProfileOpen(true)}>
             👤 {user.name || "Perfil"}
+            {user.is_admin && (
+              <span className="chip chip-admin" aria-label="Super admin">
+                admin
+              </span>
+            )}
           </button>
         </div>
       </aside>
@@ -1377,7 +1424,10 @@ export default function HomePage({
       {profileOpen && (
         <div className="overlay" onClick={() => setProfileOpen(false)}>
           <main className="card profile-card" onClick={(e) => e.stopPropagation()}>
-            <h2>Perfil</h2>
+            <h2>
+              Perfil
+              {user.is_admin && <span className="chip chip-admin">super admin</span>}
+            </h2>
             <p className="sub">Sesión iniciada como {user.email}</p>
             <form onSubmit={handleSaveProfile}>
               <p className="label">Nombre</p>
@@ -1480,6 +1530,18 @@ export default function HomePage({
         </div>
       )}
 
+      {teamsOpen && (
+        <div className="overlay" onClick={() => setTeamsOpen(false)}>
+          <TeamsPanel me={user} onClose={() => setTeamsOpen(false)} />
+        </div>
+      )}
+
+      {adminOpen && (
+        <div className="overlay" onClick={() => setAdminOpen(false)}>
+          <AdminPanel me={user} onClose={() => setAdminOpen(false)} />
+        </div>
+      )}
+
       {uploadOpen && (
         <div className="overlay" onClick={() => setUploadOpen(false)}>
           <form className="card upload-card" onClick={(e) => e.stopPropagation()} onSubmit={handleUpload}>
@@ -1524,6 +1586,20 @@ export default function HomePage({
               <option value="private">Privada (solo yo)</option>
               <option value="team">Del equipo</option>
             </select>
+            {visibility === "team" && (
+              <select
+                value={uploadTeamId}
+                onChange={(e) => setUploadTeamId(e.target.value)}
+                aria-label="Equipo"
+              >
+                <option value="">Todos mis equipos</option>
+                {myTeams.map((t) => (
+                  <option key={t.id} value={String(t.id)}>
+                    Solo: {t.name}
+                  </option>
+                ))}
+              </select>
+            )}
             {uploading && <progress value={uploadPct} max={100} aria-label="Progreso de subida" />}
             {uploadMsg && <p className="error">{uploadMsg}</p>}
             <div className="row">
@@ -1575,6 +1651,22 @@ export default function HomePage({
               <option value="private">Privada (solo yo)</option>
               <option value="team">Del equipo</option>
             </select>
+            {editDraft.visibility === "team" && (
+              <select
+                value={String(editDraft.teamId ?? "")}
+                onChange={(e) =>
+                  setEditDraft({ ...editDraft, teamId: e.target.value === "" ? null : Number(e.target.value) })
+                }
+                aria-label="Equipo"
+              >
+                <option value="">Todos mis equipos</option>
+                {myTeams.map((t) => (
+                  <option key={t.id} value={String(t.id)}>
+                    Solo: {t.name}
+                  </option>
+                ))}
+              </select>
+            )}
             <div className="row">
               <button type="button" className="ghost" onClick={() => setEditing(null)}>Cancelar</button>
               <button className="primary">Guardar</button>

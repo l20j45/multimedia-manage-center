@@ -29,6 +29,7 @@ export interface User {
   email: string;
   name: string | null;
   is_active: boolean;
+  is_admin?: boolean;
 }
 
 const TOKEN_KEY = "token";
@@ -120,6 +121,98 @@ export function resetPassword(email: string, code: string, newPassword: string):
   });
 }
 
+/** ¿El registro está abierto? Público (la pantalla de login adapta su tab). */
+export function getRegistrationStatus(): Promise<{ open: boolean }> {
+  return request("/auth/registration");
+}
+
+// ---------------------------------------------------------------- admin
+
+export interface AdminUser {
+  id: number;
+  email: string;
+  name: string | null;
+  is_active: boolean;
+  is_admin: boolean;
+  created_at: string;
+}
+
+export interface AdminOverview {
+  users: AdminUser[];
+  total: number;
+  active_count: number;
+  registration_open: boolean;
+}
+
+export function adminOverview(): Promise<AdminOverview> {
+  return request("/admin/overview");
+}
+
+export function adminPatchUser(
+  id: number,
+  data: { is_active?: boolean; is_admin?: boolean },
+): Promise<AdminUser> {
+  return request(`/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+}
+
+export function adminSetRegistration(open: boolean): Promise<{ open: boolean }> {
+  return request("/admin/registration", { method: "PUT", body: JSON.stringify({ open }) });
+}
+
+// ---------------------------------------------------------------- equipos
+
+export interface Team {
+  id: number;
+  name: string;
+  owner_id: number;
+  role: "owner" | "member";
+  member_count: number;
+}
+
+export interface TeamMember {
+  user_id: number;
+  email: string;
+  name: string | null;
+  role: "owner" | "member";
+  is_active: boolean;
+}
+
+export interface TeamDetail {
+  id: number;
+  name: string;
+  owner_id: number;
+  role: string;
+  members: TeamMember[];
+}
+
+export function listTeams(): Promise<Team[]> {
+  return request("/teams");
+}
+
+export function createTeam(name: string): Promise<Team> {
+  return request("/teams", { method: "POST", body: JSON.stringify({ name }) });
+}
+
+export function teamDetail(id: number): Promise<TeamDetail> {
+  return request(`/teams/${id}`);
+}
+
+export function addTeamMember(id: number, email: string): Promise<TeamMember> {
+  return request(`/teams/${id}/members`, { method: "POST", body: JSON.stringify({ email }) });
+}
+
+export function removeTeamMember(id: number, userId: number): Promise<void> {
+  return request(`/teams/${id}/members/${userId}`, { method: "DELETE" });
+}
+
+export function leaveTeam(id: number): Promise<void> {
+  return request(`/teams/${id}/leave`, { method: "DELETE" });
+}
+
+export function deleteTeam(id: number): Promise<void> {
+  return request(`/teams/${id}`, { method: "DELETE" });
+}
+
 // ---------------------------------------------------------------- media
 export type MediaKind = "audio" | "image" | "video";
 
@@ -138,6 +231,8 @@ export interface MediaItem {
   duration_s: number | null;
   has_thumb: boolean;
   visibility: "private" | "team";
+  /** Equipo concreto al que se compartió (null = abierto a mis equipos). */
+  team_id?: number | null;
   rating: number;
   deleted: boolean;
   created_at: string;
@@ -200,7 +295,12 @@ export function uploadMedia(
   title: string,
   tagsCsv: string,
   onProgress?: (pct: number) => void,
-  extra: { description?: string; visibility?: "private" | "team" } = {},
+  extra: {
+    description?: string;
+    visibility?: "private" | "team";
+    /** visibility=team → equipo concreto (""/null = todos mis equipos). */
+    teamId?: number | null;
+  } = {},
 ): Promise<MediaItem> {
   return new Promise((resolve, reject) => {
     const form = new FormData();
@@ -209,6 +309,7 @@ export function uploadMedia(
     form.append("tags", tagsCsv);
     if (extra.description) form.append("description", extra.description);
     if (extra.visibility) form.append("visibility", extra.visibility);
+    if (extra.teamId) form.append("team_id", String(extra.teamId));
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${getApiBase()}/media`);
@@ -237,6 +338,10 @@ export function updateMedia(
     description?: string;
     meta?: Record<string, string>;
     visibility?: "private" | "team";
+    /** visibility=team → abierto a TODOS mis equipos (team_id = null). */
+    team_all?: boolean;
+    /** visibility=team → compartido SOLO con este equipo. */
+    team_id?: number | null;
     rating?: number;
   },
 ): Promise<MediaItem> {

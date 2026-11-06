@@ -49,6 +49,19 @@ describe("LoginPage", () => {
     expect(screen.getByRole("button", { name: "Ocultar servidor" })).toBeTruthy();
   });
 
+  it("permite mostrar/ocultar la contraseña", async () => {
+    render(<LoginPage onLoggedIn={() => {}} />);
+
+    const input = screen.getByPlaceholderText("Contraseña");
+    expect((input as HTMLInputElement).type).toBe("password");
+
+    await userEvent.click(screen.getByRole("button", { name: "Mostrar contraseña" }));
+    expect((screen.getByPlaceholderText("Contraseña") as HTMLInputElement).type).toBe("text");
+
+    await userEvent.click(screen.getByRole("button", { name: "Ocultar contraseña" }));
+    expect((screen.getByPlaceholderText("Contraseña") as HTMLInputElement).type).toBe("password");
+  });
+
   it("rechaza una dirección de servidor sin http:// o https:// antes de mandar credenciales", async () => {
     const onLoggedIn = vi.fn();
     render(<LoginPage onLoggedIn={onLoggedIn} />);
