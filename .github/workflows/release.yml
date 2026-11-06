@@ -1,0 +1,69 @@
+# release.yml — instalables de escritorio vía tauri-action.
+#
+# Disparo:
+#   - Al pushear un tag `v*` (ej. `git tag v0.1.0 && git push origin v0.1.0`)
+#     → crea un GitHub Release con los instaladores adjuntos.
+#   - Manual con workflow_dispatch → genera los artefactos en el run (sin release).
+#
+# Genera por plataforma:
+#   - windows-latest → .msi, .exe (NSIS)
+#   - macOS/Linux se agregan fácil como jobs hermanos (runner y cache iguales).
+#
+# Notas:
+# - Tauri no permite cross-compilar hacia Windows desde macOS/Linux; por eso el
+#   instalador de Windows se construye aquí y no en local.
+# - VITE_API_URL se inyecta como variable de entorno (vite.config.ts usa
+#   envDir: ".." para el .env raíz, que no existe en CI).
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "frontend/src-tauri"
+
+      - name: Instalar dependencias del frontend
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Generar instaladores Windows
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_API_URL: ${{ vars.VITE_API_URL || 'http://localhost:8000' }}
+        with:
+          projectPath: frontend
+          includeDebug: false
+          includeRelease: true
+          tagName: ${{ github.ref_name }}
+          releaseName: "Biblioteca de Recursos Multimedia v__VERSION__"
+          releaseDraft: false
+          prerelease: false

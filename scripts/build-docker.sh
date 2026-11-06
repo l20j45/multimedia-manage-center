@@ -38,8 +38,9 @@ fi
 
 echo "Motor: $ENGINE   Plataforma: ${PLATFORM:-nativa}   Imagen: ${SLUG}-api:latest"
 
-EXTRA_ARGS=()
-if [ -n "$PLATFORM" ]; then EXTRA_ARGS+=(--platform "$PLATFORM"); fi
+# Nota: bash 3.2 (macOS) con `set -u` lanza "unbound variable" al expandir
+# `${EXTRA_ARGS[@]}` de un array vacío; el guard `${EXTRA_ARGS[@]+...}` lo evita.
+EXTRA_ARGS=( ${PLATFORM:+--platform "$PLATFORM"} )
 
 # Modo prueba: imprime lo que correría y sale sin construir
 if [ "${1:-}" = "--dry-run" ]; then
@@ -50,12 +51,12 @@ fi
 
 if [ "$ENGINE" = "podman" ]; then
   # --format docker: imagen portable con docker{,-compose} load/up en la Pi
-  podman build --format docker "${EXTRA_ARGS[@]}" backend -t "${SLUG}-api:latest"
+  podman build --format docker ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} backend -t "${SLUG}-api:latest"
   echo ""
   echo "Imagen en el storage de podman: ${SLUG}-api:latest"
   echo "Para la RPi:  podman save ${SLUG}-api:latest | gzip > ${SLUG}-api.tar.gz"
 else
-  docker build "${EXTRA_ARGS[@]}" backend -t "${SLUG}-api:latest"
+  docker build ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} backend -t "${SLUG}-api:latest"
 fi
 
 echo ""

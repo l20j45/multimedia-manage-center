@@ -32,3 +32,6 @@ backups/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Export local de la imagen Docker (podman save | gzip) — no committear
+*.tar.gz

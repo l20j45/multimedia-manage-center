@@ -15,6 +15,18 @@ Proyecto generado con el scaffolding **FastAPI + Tauri** (Windows / macOS / Linu
 - **CI**: GitHub Actions (`.github/workflows/ci.yml`) — backend, frontend e imagen Docker en cada PR/push; compilados nativos multiplataforma (Windows/macOS/Linux + instaladores como artifacts) solo con un tag `v*` o ejecución manual por `Actions → Run workflow`
 - **Docker**: `docker-compose.yml` para desplegar la API (FastAPI + SQLite) con un ejecutable persistente
 
+## Capturas
+
+| Login con tu primera entrada | Biblioteca |
+| --- | --- |
+| ![Login con selector de instancia](docs/screenshots/login.png) | ![Biblioteca](docs/screenshots/biblioteca.png) |
+
+> **Login**: abajo del card hay un enlace *“Usar otra instancia (cambiar servidor)”*
+> que despliega 🌐 la dirección del backend. Cualquier instalación (DMG, .msi o
+> APK) puede apuntar a **su propia instancia** sin recompilar.
+> **Biblioteca**: tags sugeridos, rating, visibilidad (privada / del equipo),
+> colecciones, stats y papelera.
+
 ## Backup de tus datos
 
 `backend/uploads/` y `backend/app.db` NO viven en git (son tus ficheros). Respáldalos con:
@@ -42,8 +54,8 @@ Biblioteca de Recursos Multimedia/
 │   │   ├── schemas.py     # Esquemas Pydantic
 │   │   ├── security.py    # Bcrypt + JWT
 │   │   ├── deps.py        # Dependencias (usuario actual, sesión BD)
-│   │   ├── routers/       # /health, /auth, /users
-│   │   └── services/      # email.py (SMTP)
+│   │   ├── routers/       # /health, /auth, /users, /media, /collections
+│   │   └── services/      # email.py (SMTP), media.py (uploads + ffmpeg + Pillow)
 │   ├── alembic/           # Migraciones de la BD
 │   │   └── versions/      # 0001, 0002… las nuevas que generes
 │   ├── tests/             # Tests (pytest) — test de humo incluido
@@ -156,6 +168,18 @@ pnpm run tauri dev
 La primera compilación de Rust tarda unos minutos. Para empaquetar instaladores: `pnpm run tauri build`
 (en macOS genera `MyApp.app` + `.dmg`; en Windows `.msi`/`.exe`; en Linux `.deb`/`.AppImage`).
 
+#### Cambiar de backend sin recompilar (instancia propia)
+
+El backend que la app trae compilado (`VITE_API_URL`) es solo el **default**.
+En el login (o en el perfil de HomePage) puedes apuntar a otra instancia:
+
+1. Login → **“Usar otra instancia (cambiar servidor)”** → escribe la URL
+   (ej. `http://192.168.1.10:8000` o `https://api.midominio.com`).
+2. Pulsa *Entrar*: la dirección se valida y se guarda **antes** de enviar credenciales.
+3. Se guarda por dispositivo (`localStorage`, clave `api_base`); dejando el
+   campo vacío vuelve al backend compilado. También puedes cambiarla después
+   desde el perfil en HomePage.
+
 ### 3. Correos (SMTP)
 
 Edita `backend/.env` con tus datos SMTP (Gmail: host `smtp.gmail.com`, port `465`, usar *contraseña de aplicación*).
@@ -169,8 +193,11 @@ docker compose up              # desde la raíz; BD persistente en un volumen
 ```
 
 El nombre de la imagen (`${PROJECT_SLUG}-api`) y el puerto publicado
-(`${API_PORT}:8000`) se leen del **`.env` raíz** — nada hardcodeado. Si no
+(`$API_PORT:8000`) se leen del **`.env` raíz** — nada hardcodeado. Si no
 existe alguna de las variables usa los defaults (`biblioteca-recursos-multimedia`, `8000`).
+
+La imagen de Docker **solo compila la API** (FastAPI + SQLite, puerto 8000).
+Ideal si algún día quieres exponer el backend sin la app de escritorio.
 
 #### Deploy en Raspberry Pi
 
@@ -218,13 +245,11 @@ La APK firmada queda en
   `TAURI_ANDROID_KEY_ALIAS`, `_KEY_PASSWORD`); sin esas variables compila sin
   firmar sin romper nada. El script de signing vuelve a parchear gradle porque
   `src-tauri/gen/` no se sube a git.
-- `VITE_API_URL` (también del `.env` raíz) es la dirección del backend que la
-  APK lleva compilada: cámbiala y **recompila**.
+- `VITE_API_URL` (también del `.env` raíz) es la dirección del backend con la
+  que la APK lleva compilada el default... aunque la app permite cambiar el
+  servidor en runtime (login o perfil), así que es a título de default inicial.
 - Mientras el backend sea HTTP, `app/build.gradle.kts` usa cleartext; si pasa a
   HTTPS, pon `usesCleartextTraffic` en `false`.
-
-Solo compila la API (FastAPI + SQLite, puerto 8000). Ideal si algún día quieres
-exponer el backend sin la app de escritorio.
 
 ## Variables globales raíz (`.env`)
 
@@ -234,12 +259,21 @@ proyecto (no se sube a git; copia `.env.example` para empezar):
 | Variable                        | Qué controla                                                                 |
 |---------------------------------|------------------------------------------------------------------------------|
 | `PROJECT_NAME` / `PROJECT_SLUG` | Nombre de la app y slug para paquetes/imagen Docker                           |
-| `VITE_API_URL`                  | Dirección donde queda el backend FastAPI. Se lee en **build-time** de Vite: si la cambias, recompila (`pnpm tauri android build --apk` o `pnpm run tauri build`) |
+| `VITE_API_URL`                  | Dirección **default** del backend al compilar (Vite). La app permite cambiarla **en runtime** desde el login/perfil (localStorage `api_base`), así que solo es el arranque inicial, no algo fijo |
 | `TAURI_ANDROID_KEYSTORE_PATH` / `..._PASSWORD` / `..._ALIAS` / `..._KEY_PASSWORD` | Firma automática de la APK de release (leído por `gen/android/app/build.gradle.kts`) |
 | `API_PORT`                      | Puerto del despliegue Docker del backend                                      |
 
-La APK de release queda en
-`frontend/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`.
+## Instaladores y versiones
+
+- **Windows (.msi / .exe)** — se generan en GitHub Actions con
+  `.github/workflows/release.yml`: al pushear un tag `v*` (ej. `git tag v0.10 &&
+  git push origin v0.10`) tauri-action crea un GitHub Release con los
+  instaladores adjuntos.
+- **macOS (.app/.dmg)** — `pnpm run tauri build` en una Mac (los binarios son
+  por arquitectura: `aarch64` para Apple Silicon).
+- **Android (.apk firmada)** — sección 5 más arriba.
+- **Docker (backend, arm64 nativo)** — `scripts/build-docker.sh` + `docker compose up`;
+  el `tar.gz` para la Pi sale con `podman save ... | gzip`.
 
 ## Graphify
 
