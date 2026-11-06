@@ -1,0 +1,33 @@
+# Deploy de la Pi: API (imagen de Docker Hub) + Caddy (HTTPS + página web).
+# Caddy sirve la SPA (www/) y proxea las rutas de la API al contenedor api.
+# Todo configurable por el .env de ESTA carpeta (copiar .env.example).
+services:
+  api:
+    image: l20j45/biblioteca-recursos-multimedia-api:${IMAGE_TAG:-latest}
+    ports:
+      - "127.0.0.1:8000:8000" # solo local: el público sale por Caddy
+    env_file:
+      - backend.env             # tus SECRET_KEY/CORS/SMTP (gitignoreado)
+    environment:
+      DATABASE_URL: sqlite:////app/data/app.db
+      MEDIA_DIR: /app/data/uploads
+    volumes:
+      - api-data:/app/data
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"                 # ACME challenge HTTP
+      - "443:443"               # HTTPS final
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./www:/srv/www:ro       # la SPA compilada (deploy.sh la llena)
+      - caddy-data:/data        # certificados de Let's Encrypt
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  api-data:
+  caddy-data:
+  caddy-config:

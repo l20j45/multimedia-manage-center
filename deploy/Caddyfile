@@ -1,0 +1,28 @@
+# Caddy — página web (SPA estática) + proxy de la API en el mismo dominio.
+#
+#   www/        → ficheros de la web compilada (deploy.sh la llena)
+#   /health, /auth…, /media…, /users…, /collections…, /settings…
+#             → api:8000 (FastAPI)
+#
+# Los certificados de Let's Encrypt son automáticos (solo requieren que el
+# DNS A/AAAA del dominio apunte a ESTA máquina y que 80/443 estén abiertos).
+
+{$SITE_URL:https://assetsmanager.l20j45.us} {
+	encode zstd gzip
+
+	# --- API: cualquier ruta conocida del backend -------------------------
+	@api path /health /health/* /auth* /users* /media* /collections* /settings*
+	handle @api {
+		reverse_proxy api:8000
+	}
+
+	# --- Web: SPA estática con fallback a index.html ----------------------
+	handle {
+		root * /srv/www
+		try_files {path} /index.html
+		file_server
+	}
+
+	# cabeceras de PWA y caché de assets
+	header /assets/* Cache-Control "max-age=31536000, immutable"
+}

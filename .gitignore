@@ -35,3 +35,7 @@ Thumbs.db
 
 # Export local de la imagen Docker (podman save | gzip) — no committear
 *.tar.gz
+
+# deploy/ — secretos y build de la web (solo configs al repo)
+deploy/backend.env
+deploy/www/

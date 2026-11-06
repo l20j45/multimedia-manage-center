@@ -68,7 +68,8 @@ Biblioteca de Recursos Multimedia/
 │   ├── src/               # UI de la app (login/registro/recuperación)
 │   └── src-tauri/         # Shell nativo (Rust)
 ├── .github/workflows/     # CI (ruff+pytest, vitest+build, docker, native builds)
-├── docker-compose.yml     # API en Docker con BD persistente
+├── deploy/                # Pi/servidor: compose (API+web+Caddy HTTPS), deploy.sh
+├── docker-compose.yml     # API en Docker con BD persistente (solo backend)
 ├── render.sh              # convierte esta copia en un proyecto nuevo
 ├── scripts/               # ayuda: firma de APK Android, build Docker, etc.
 ├── LICENSE                # MIT
