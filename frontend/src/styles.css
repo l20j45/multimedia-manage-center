@@ -574,7 +574,7 @@ button.ghost:hover { border-color: var(--accent); color: var(--accent); }
 .card h2 { margin: 0 0 0.3rem; letter-spacing: 0.02em; }
 .sub { color: var(--muted); font-size: 0.85rem; margin: 0.2rem 0 0.8rem; }
 
-/*---------------
+/*--------------- 
    TABS (como pestañas de archivo)
 ---------------*/
 .tabs {
@@ -586,7 +586,10 @@ button.ghost:hover { border-color: var(--accent); color: var(--accent); }
   padding: 0.25rem;
 }
 
-button.tab {
+/* Estilo para TODO botón dentro de .tabs (con o sin la clase tab), para que
+   ningún tab quede crudo aunque alguien olvide className="tab". */
+button.tab,
+.tabs > button {
   border: none;
   background: transparent;
   padding: 0.45rem 0.9rem;
@@ -597,8 +600,10 @@ button.tab {
   color: var(--muted);
   transition: color .12s ease, background .12s ease;
 }
-button.tab:hover { color: var(--text); }
-button.tab.active {
+button.tab:hover,
+.tabs > button:hover { color: var(--text); }
+button.tab.active,
+.tabs > button.active {
   background: var(--accent);
   color: #191100;
   box-shadow: 0 2px 12px #f5b84135;
