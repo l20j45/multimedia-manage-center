@@ -152,12 +152,8 @@ def upload(
                 break
     payload = schemas.MediaOut.from_item(item)
     payload.compress_job_id = job_id
-    payload.duplicate_of = (
-        schemas.MediaRef(id=dup.id, title=dup.title) if dup else None
-    )
-    payload.similar_of = (
-        schemas.MediaRef(id=similar.id, title=similar.title) if similar else None
-    )
+    payload.duplicate_of = schemas.MediaRef(id=dup.id, title=dup.title) if dup else None
+    payload.similar_of = schemas.MediaRef(id=similar.id, title=similar.title) if similar else None
     return payload
 
 
@@ -354,7 +350,9 @@ def duplicates(
     for it in imgs:
         clusters.setdefault(find(it.id), []).append(schemas.MediaOut.from_item(it))
     similar = [
-        members for members in clusters.values() if len(members) >= 2
+        members
+        for members in clusters.values()
+        if len(members) >= 2
         # si TODOS son copias byte-idénticas, ya están en `groups`: no mostrarles doble
         and not all(m.id in exact_ids for m in members)
     ]
@@ -591,12 +589,8 @@ def split_audio(
     """
     item = _owned_item(db, user, item_id)
     if item.kind != "audio":
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, detail="Solo los audios se pueden separar"
-        )
-    frags_rel: list[str] | None = media_svc.split_by_silence(
-        item.path, data.noise_db, data.min_len
-    )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Solo los audios se pueden separar")
+    frags_rel: list[str] | None = media_svc.split_by_silence(item.path, data.noise_db, data.min_len)
     if frags_rel is None:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -646,9 +640,7 @@ def job_latest(
     item = _owned_item(db, user, item_id)
     job = jobs_svc.latest_job(item.id)
     if not job:
-        return schemas.JobOut(
-            job_id="", item_id=item.id, status="none", new_size=item.size
-        )
+        return schemas.JobOut(job_id="", item_id=item.id, status="none", new_size=item.size)
     return schemas.JobOut(**job)
 
 

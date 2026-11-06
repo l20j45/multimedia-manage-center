@@ -29,9 +29,7 @@ def _default_workers() -> int:
     return 1 if platform.machine().startswith(("arm", "aarch64")) else 2
 
 
-_executor = ThreadPoolExecutor(
-    max_workers=_default_workers(), thread_name_prefix="compress"
-)
+_executor = ThreadPoolExecutor(max_workers=_default_workers(), thread_name_prefix="compress")
 _lock = threading.Lock()  # serializa de-dup de encuestas concurrentes
 
 
@@ -65,11 +63,7 @@ def enqueue_compress(item_id: int, kind: str) -> str:
             if active:
                 return active.id
             job_id = uuid.uuid4().hex[:12]
-            db.add(
-                CompressionJob(
-                    id=job_id, item_id=item_id, kind=kind, status="queued"
-                )
-            )
+            db.add(CompressionJob(id=job_id, item_id=item_id, kind=kind, status="queued"))
             db.commit()
         finally:
             db.close()
@@ -122,8 +116,10 @@ def recover_stale() -> int:
             db.query(CompressionJob)
             .filter(CompressionJob.status.in_(("queued", "running")))
             .update(
-                {CompressionJob.status: "lost",
-                 CompressionJob.error: "el server se reinició a mitad del job"},
+                {
+                    CompressionJob.status: "lost",
+                    CompressionJob.error: "el server se reinició a mitad del job",
+                },
                 synchronize_session=False,
             )
         )
@@ -203,9 +199,7 @@ def _compress_image(job_id: str, item: Any, db: Any) -> None:
         return
     if comp[2]:
         item.path, item.size = comp[0], comp[1]
-        item.mime = media_svc.IMG_MIME.get(
-            Path(comp[0]).suffix.lower(), item.mime
-        )
+        item.mime = media_svc.IMG_MIME.get(Path(comp[0]).suffix.lower(), item.mime)
         item.thumb_path = media_svc.make_thumbnail(item.path, "image")
         item.phash = media_svc.phash_for_media(item.path, "image")
         db.commit()

@@ -25,10 +25,23 @@ def _fat_mp4() -> bytes:
     tmp.parent.mkdir(parents=True, exist_ok=True)
     media_svc._ffmpeg_run(
         [
-            media_svc.ffmpeg_bin(), "-loglevel", "error", "-y",
-            "-f", "lavfi", "-i", "mandelbrot=s=320x240",
-            "-c:v", "mpeg4", "-qscale:v", "1", "-t", "2", str(tmp),
-        ], 60,
+            media_svc.ffmpeg_bin(),
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "mandelbrot=s=320x240",
+            "-c:v",
+            "mpeg4",
+            "-qscale:v",
+            "1",
+            "-t",
+            "2",
+            str(tmp),
+        ],
+        60,
     )
     data = tmp.read_bytes()
     tmp.unlink()

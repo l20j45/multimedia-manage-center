@@ -28,9 +28,7 @@ def make_ad_wav() -> bytes:
 
     def seg(freq: float, seconds: float, amp: int = 20000) -> list[int]:
         n = int(SR * seconds)
-        return [
-            int(amp * math.sin(2 * math.pi * freq * (i / SR))) for i in range(n)
-        ]
+        return [int(amp * math.sin(2 * math.pi * freq * (i / SR))) for i in range(n)]
 
     samples = seg(500, 0.8) + [0] * int(SR * 1.1) + seg(900, 0.8)
     buf = Path(settings.MEDIA_DIR) / "_ad.wav"
@@ -95,10 +93,12 @@ def test_split_sin_silencios_400() -> None:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(SR)
-        w.writeframes(b"".join(
-            struct.pack("<h", int(15000 * math.sin(2 * math.pi * 700 * (i / SR))))
-            for i in range(SR * 2)
-        ))
+        w.writeframes(
+            b"".join(
+                struct.pack("<h", int(15000 * math.sin(2 * math.pi * 700 * (i / SR))))
+                for i in range(SR * 2)
+            )
+        )
     data = buf.read_bytes()
     buf.unlink()
     res = client.post(
@@ -132,11 +132,7 @@ def test_split_parametros_valen_rango() -> None:
     """El parámetro noise_db/min_len fuera de rango → 422 (validación pydantic)."""
     token = register_and_login("split-arg")
     item = upload_audio(token)
-    r = client.post(
-        f"/media/{item['id']}/split", headers=auth(token), json={"noise_db": 50}
-    )
+    r = client.post(f"/media/{item['id']}/split", headers=auth(token), json={"noise_db": 50})
     assert r.status_code == 422
-    r = client.post(
-        f"/media/{item['id']}/split", headers=auth(token), json={"min_len": 0}
-    )
+    r = client.post(f"/media/{item['id']}/split", headers=auth(token), json={"min_len": 0})
     assert r.status_code == 422

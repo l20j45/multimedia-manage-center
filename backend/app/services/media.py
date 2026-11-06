@@ -38,7 +38,11 @@ def _ffmpeg_run(cmd: list[str], timeout: int, cmd_name: str = "ffmpeg", text: bo
     if settings.FFMPEG_LOW_PRIORITY and cmd_name in ("ffmpeg", "ffprobe"):
         if sys.platform == "win32":
             return subprocess.run(
-                cmd, timeout=timeout, check=True, capture_output=True, text=text,
+                cmd,
+                timeout=timeout,
+                check=True,
+                capture_output=True,
+                text=text,
                 creationflags=subprocess.BELOW_NORMAL_PRIORITY_CLASS,
             )
         # posix: nice sólo si el binario existe (en Docker slim a veces no)
@@ -46,7 +50,10 @@ def _ffmpeg_run(cmd: list[str], timeout: int, cmd_name: str = "ffmpeg", text: bo
         if nice:
             return subprocess.run(
                 [nice, "-n", "10", *cmd],
-                timeout=timeout, check=True, capture_output=True, text=text,
+                timeout=timeout,
+                check=True,
+                capture_output=True,
+                text=text,
             )
     return subprocess.run(cmd, timeout=timeout, check=True, capture_output=True, text=text)
 

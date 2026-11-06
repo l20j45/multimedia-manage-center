@@ -73,21 +73,36 @@ def test_audios_gemelos_via_onda(monkeypatch) -> None:
         tmp = Path(tempfile.mkdtemp(prefix="phash-audio-")) / "a.mp3"
         media_svc._ffmpeg_run(
             [
-                media_svc.ffmpeg_bin(), "-loglevel", "error", "-y",
-                "-f", "lavfi", "-i", "sine=frequency=880:duration=2",
-                "-codec:a", "libmp3lame", "-q:a", q, str(tmp),
-            ], 60,
+                media_svc.ffmpeg_bin(),
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=880:duration=2",
+                "-codec:a",
+                "libmp3lame",
+                "-q:a",
+                q,
+                str(tmp),
+            ],
+            60,
         )
         return tmp.read_bytes()
 
     token = register_and_login("phash-aud")
     r1 = client.post(
-        "/media", headers=auth(token), data={"title": "SFX 320", "tags": ""},
+        "/media",
+        headers=auth(token),
+        data={"title": "SFX 320", "tags": ""},
         files={"file": ("a1.mp3", mp3("2"), "audio/mpeg")},
     )
     assert r1.status_code == 201
     r2 = client.post(
-        "/media", headers=auth(token), data={"title": "SFX 128", "tags": ""},
+        "/media",
+        headers=auth(token),
+        data={"title": "SFX 128", "tags": ""},
         files={"file": ("a2.mp3", mp3("6"), "audio/mpeg")},
     )
     assert r2.status_code == 201
@@ -142,7 +157,6 @@ def test_duplicados_endpoint_expose_similar() -> None:
     )
     assert resp.status_code == 201
     assert resp.json()["similar_of"] is not None, "aviso de gemelo visual en upload"
-
 
     # sin gemelos: similar vacío
     other = register_and_login("phash-tonely")
