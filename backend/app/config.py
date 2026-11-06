@@ -21,7 +21,11 @@ class Settings(BaseSettings):
 
     # Orígenes permitidos, separados por comas: http://a,http://b
     # Espera: localhost (web dev), tauri.localhost (escritorio/APK) y tu dominio de producción.
+    # CORS: orígenes por navegador (lista exacta) y opcionalmente un patrón
+    # regex para cubrir varias páginas/subdominios dinámicos del proyecto
+    # (ej. https://.*.l20j45.us). VER README "CORS" — IPs de CLIENTES no van aquí.
     CORS_ORIGINS: str = "http://localhost:5173,http://tauri.localhost,https://tauri.localhost"
+    CORS_ORIGIN_REGEX: str = ""
 
     # Auto-tag con IA (opcional): llave de Gemini para sugerir tags al subir.
     # Sin llave se usa la heurística local (duración/aspecto/nombre).
@@ -73,6 +77,17 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+
+    @property
+    def cors_origin_regex(self) -> str | None:
+        """Patrón de orígenes CORS (ej. todos los subdominios de tu zona).
+
+        Cuando el proyecto crece y hay varias páginas/instancias con IPs o
+        subdominios distintos que no quieres listar una por una:
+            CORS_ORIGIN_REGEX=https://.*\\.l20j45\\.us(:\\d+)?
+        Vacío (default) = solo la lista exacta de CORS_ORIGINS.
+        """
+        return self.CORS_ORIGIN_REGEX.strip() or None
 
 
 settings = Settings()

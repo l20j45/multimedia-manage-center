@@ -148,9 +148,14 @@ uv run ruff format .          # formato automático
 - **Rate limiting por IP** en `/auth/register`, `/auth/login`, `/auth/forgot-password`
   y `/auth/reset-password` (429 + `Retry-After`). Defaults: login 10/min, registro
   y recuperación 5/min. Configurables en `backend/.env` (`RATE_LIMIT_*`).
-- **CORS por entorno**: `CORS_ORIGINS` en `backend/.env` — incluye `localhost`
-  (web dev), `http(s)://tauri.localhost` (escritorio/APK) y **tu dominio real**
-  cuando despliegues. Mantenla coherente con `VITE_API_URL` del `.env` raíz.
+- **CORS por entorno**: `CORS_ORIGINS` en `backend/.env` (lista exacta)
+  y `CORS_ORIGIN_REGEX` para cubrir varias páginas/subdominios del proyecto
+  **sin listarlas una por una** (ej. `CORS_ORIGIN_REGEX=https://.*\.l20j45\.us(:\d+)?`).
+  **Importante:** CORS es sobre el *origen de la página* que corre en un navegador —
+  las **IPs de los clientes/dispositivos que llaman a la API NO van aquí**
+  (cambiar de IP no rompe nada), y a las apps nativas (Tauri/APK) ni les aplica.
+  Solo lista el dominio de cada página web que consume la API, o usa el regex
+  para subdominios de tu zona. Coherente con `VITE_API_URL` del `.env` raíz.
 
 ##### Recuperación de contraseña (opcional SMTP o consola)
 
@@ -187,6 +192,20 @@ Edita `backend/.env` con tus datos SMTP (Gmail: host `smtp.gmail.com`, port `465
 Sin SMTP configurado, la app funciona normal y los correos (bienvenida, código de recuperación) se registran por consola.
 
 ### 4. API en producción (Docker)
+
+Para el bundle completo self-hosted (API pública en su puerto + página web con
+nginx, TLS vía Cloudflare), usa la carpeta **`deploy/`** — ver
+[`deploy/README.md`](deploy/README.md):
+
+```bash
+cp deploy/.env.example deploy/.env               # IMAGE_TAG, API_PORT
+cp deploy/backend.env.example deploy/backend.env # SECRET_KEY, CORS, SMTP
+bash deploy/deploy.sh pi@raspberrypi.local       # build web + rsync + up
+```
+
+La web también se puede publicar aparte (es estática):
+`cd frontend && pnpm run build` → sube `frontend/dist/` donde quieras
+(Cloudflare Pages, S3, etc.), apuntando `VITE_API_URL` a tu API.
 
 ```bash
 bash scripts/build-docker.sh   # construye la imagen con el nombre del .env raíz
