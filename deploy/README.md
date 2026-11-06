@@ -15,6 +15,33 @@ HTTP por el 80 (modo SSL *Full* en el panel de Cloudflare).
 
 ## Puesta en marcha (una vez)
 
+Tres caminos; en **todos** los datos viven en el volumen Docker `api-data` —
+puedes borrar el repo/carpeta cuando quieras **sin perder la BD ni los uploads**.
+
+**A — Solo Docker en la Pi (sin repo, sin build):** corre `deploy/bootstrap.sh`
+DENTRO de la Pi (con `backend.env` rellenado al lado) → trae la imagen de
+Docker Hub y levanta API + nginx. La web se publica después con `deploy.sh`
+desde tu PC (`rsync` de `www/`).
+
+**B — Deploy desde tu Mac/Windows (repo vive solo en tu PC):**
+```bash
+bash deploy/deploy.sh pi@raspberrypi.local
+# la Pi queda con ~/biblioteca (compose + nginx.conf + www/ + backend.env);
+# el repo jamás hace falta tenerlo en la Pi.
+```
+
+**C — Clonar el repo en la Pi (temporal), deploy, borrar:**
+```bash
+git clone --depth 1 https://github.com/l20j45/multimedia-manage-center.git
+cd multimedia-manage-center
+cp deploy/.env.example deploy/.env               && $EDITOR deploy/.env     # IMAGE_TAG/API_PORT
+cp deploy/backend.env.example deploy/backend.env && $EDITOR deploy/backend.env
+SKIP_BUILD=1 bash deploy/deploy.sh 127.0.0.1     # ssh a sí misma
+cd .. && rm -rf multimedia-manage-center         # seguro: datos en api-data
+```
+(Si también quieres la web compilada ahí: `deploy/deploy.sh` sin `SKIP_BUILD`,
+pero necesita Node+pnpm en la Pi — mejor compila la web en tu PC y usa B.)
+
 ```bash
 # 1. DNS en Cloudflare: registro A/AAAA de tu dominio → IP de la Pi (proxy ON).
 
