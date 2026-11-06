@@ -603,6 +603,14 @@ body::before {
 .link.danger { color: var(--danger); }
 .link.danger:hover { color: #ff8a84; }
 
+/* mini select de equipo dentro del detalle (inline, discreto) */
+dd .chip-select {
+  margin-left: 0.4rem;
+  padding: 0.25rem 0.45rem;
+  font-size: 0.72rem;
+  max-width: 180px;
+}
+
 /*---------------
    INPUTS/BASE
 ---------------*/

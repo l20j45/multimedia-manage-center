@@ -10,6 +10,7 @@ import {
   updateMedia,
   type MediaItem,
   type MediaKind,
+  type Team,
 } from "../lib/api";
 
 const KIND_LABEL: Record<MediaKind, string> = { audio: "Audio", image: "Imagen", video: "Video" };
@@ -48,6 +49,7 @@ export default function DetailPanel({
   onNavigate,
   onCompressQueued,
   onSplitCreated,
+  teams = [],
 }: {
   item: MediaItem;
   onClose: () => void;
@@ -58,6 +60,8 @@ export default function DetailPanel({
   onNavigate?: (dir: 1 | -1) => void;
   onCompressQueued?: (itemId: number) => void;
   onSplitCreated?: (frags: MediaItem[]) => void;
+  /** Equipos del usuario actual (para el selector "compartir con…"). */
+  teams?: Team[];
 }) {
   const [extracting, setExtracting] = useState(false);
   const [compressing, setCompressing] = useState(false);
@@ -366,6 +370,29 @@ export default function DetailPanel({
                   >
                     {cur.visibility === "team" ? "👥 Del equipo" : "🔒 Privada"}
                   </button>
+                  {cur.visibility === "team" && teams.length > 0 && (
+                    <select
+                      className="chip-select"
+                      value={String(cur.team_id ?? "")}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        void patch(
+                          v === ""
+                            ? { visibility: "team", team_all: true }
+                            : { team_id: Number(v) },
+                        );
+                      }}
+                      aria-label="Equipo con el que se comparte"
+                      title="A quién del equipo ve este recurso"
+                    >
+                      <option value="">Todos mis equipos</option>
+                      {teams.map((t) => (
+                        <option key={t.id} value={String(t.id)}>
+                          Solo: {t.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </dd>
               </div>
             </dl>

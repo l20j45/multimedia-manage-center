@@ -1418,6 +1418,7 @@ export default function HomePage({
               Promise.all([loadItems(0, true), loadTags(), loadCollections()]);
             }
           }}
+          teams={myTeams}
         />
       )}
 
