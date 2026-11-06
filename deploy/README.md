@@ -89,5 +89,19 @@ SKIP_BUILD=1 bash deploy/deploy.sh pi@host       # solo configs (nginx.conf, bac
 ssh pi@raspberrypi 'docker logs -f deploy-web-1' # logs
 ```
 
+## ¿Desde una PC con Windows? 
+
+Sí — dos caminos, el build de la web ahí mismo no usa Rust (`tsc && vite build`,
+solo Node+pnpm):
+
+| Camino | Qué necesitas | Notas |
+|---|---|---|
+| **Git Bash** (recomendado) | Git for Windows + Node + pnpm en PATH | `deploy.sh` detecta que no hay `rsync` y hace fallback a `ssh`+`scp` (funciona igual; con `rsync` en WSL/MSYS queda `--delete`) |
+| **WSL2** | Ubuntu en WSL + ssh/rsync + Node/pnpm | `rsync -a --delete` completo; lo más limpio |
+
+En ambos casos el build pesado NO corre en la Windows PC: solo la web. La API
+sale de Docker Hub (`docker compose pull` lo corre la propia Pi) — en la
+Windows PC no hace falta Docker, únicamente `ssh` hacia la Pi.
+
 ⚠️ `latest` en Docker Hub la publica el CI con cada tag `v*`; fija `IMAGE_TAG`
 en el `.env` de deploy si no quieres que la versión cambie sola bajo ti.

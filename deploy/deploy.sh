@@ -6,10 +6,11 @@
 #
 # Qué hace:
 #   1. Compila la SPA con VITE_API_URL del .env raíz → deploy/www/
-#   2. rsync de deploy/ (compose, Caddyfile, www/, backend.env) a DEST:~/biblioteca
+#   2. Copia deploy/ (compose, nginx.conf, www/, backend.env) a DEST:~/biblioteca
 #   3. docker compose pull + up -d en el host
 #
-# Requisitos: ssh accesible, rsync, y docker+compose-plugin en el destino.
+# Requisitos: ssh accesible y docker+compose-plugin en el destino.
+# rsync: si no existe (ef. Git-for-Windows), hace fallback a scp/tar por ssh.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,12 +34,20 @@ if [ "${SKIP_BUILD:-0}" != "1" ]; then
 fi
 [ -d deploy/www ] || { echo "✗ deploy/www/ no existe (corre sin SKIP_BUILD la primera vez)." >&2; exit 1; }
 
-# --- 1. sincronizar ----------------------------------------------------------
+# --- 1. sincronizar (rsync si existe; Windows Git Bash no lo trae) -----------
 echo "→ Sincronizando a $DEST:~/biblioteca ..."
 ssh "$DEST" "mkdir -p ~/biblioteca"
-rsync -av --delete deploy/Caddyfile deploy/docker-compose.yml deploy/www \
-  "$DEST:~/biblioteca/"
-rsync -av deploy/backend.env "$DEST:~/biblioteca/backend.env"
+if command -v rsync >/dev/null 2>&1; then
+  rsync -av --delete deploy/docker-compose.yml deploy/nginx.conf deploy/www \
+    deploy/.env.example "$DEST:~/biblioteca/"
+  rsync -av deploy/backend.env "$DEST:~/biblioteca/backend.env"
+else
+  # Fallback Windows (sin --delete: ficheros viejos quedan, pero index.html
+  # apunta a los assets nuevos con hash; inofensivo).
+  tar czf - -C deploy docker-compose.yml nginx.conf www .env.example |
+    ssh "$DEST" "tar xzf - -C ~/biblioteca"
+  scp -q deploy/backend.env "$DEST:~/biblioteca/backend.env"
+fi
 
 # --- 2. levantar -------------------------------------------------------------
 echo "→ docker compose pull + up -d ..."
