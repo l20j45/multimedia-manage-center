@@ -27,6 +27,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Contenedor multi-arquitectura (Docker Hub) — corre en linux con buildx+QEMU;
+  # es el artefacto para desplegar la API (docker compose up) y la RPi arm64.
+  docker-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extraer tag de imagen (v0.10 → 0.10)
+        id: tag
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/biblioteca-recursos-multimedia-api:latest
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/biblioteca-recursos-multimedia-api:v${{ steps.tag.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   build-windows:
     runs-on: windows-latest
     permissions:
