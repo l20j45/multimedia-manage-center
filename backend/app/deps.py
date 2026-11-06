@@ -30,6 +30,18 @@ def get_current_user(
     return user
 
 
+def get_current_admin(
+    user: User = Depends(get_current_user),
+) -> User:
+    """Guard para endpoints de administración (solo super admin)."""
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo el administrador puede hacer esto",
+        )
+    return user
+
+
 def get_current_user_flexible(
     request: Request,
     db: Session = Depends(get_db),

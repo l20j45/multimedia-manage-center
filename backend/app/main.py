@@ -10,7 +10,9 @@ from alembic import command
 from app.config import settings
 from app.rate_limit import RateLimitMiddleware
 from app.routers import auth, collections, health, media, users
+from app.routers.admin import router as admin_router
 from app.routers.settings import router as settings_router
+from app.routers.teams import router as teams_router
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -71,6 +73,8 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(admin_router)
+app.include_router(teams_router)
 app.include_router(media.router)
 app.include_router(collections.router)
 app.include_router(settings_router)

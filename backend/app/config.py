@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     RATE_LIMIT_LOGIN: int = 10  # intentos por ventana y IP
     RATE_LIMIT_REGISTER: int = 5
     RATE_LIMIT_PASSWORD_RESET: int = 5
+    # /admin y /teams tambiénWRITE-sensibles (llevan decisiones de acceso y
+    # permiten enumerar correos en /teams/{id}/members → freno por IP)
+    RATE_LIMIT_ADMIN: int = 30
+    RATE_LIMIT_TEAMS: int = 60
 
     # Biblioteca de medios: carpeta de ficheros y subida máxima (MB)
     MEDIA_DIR: str = "uploads"

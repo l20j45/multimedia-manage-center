@@ -29,6 +29,22 @@ _ROUTE_LIMITS: dict[str, int] = {
     "/auth/forgot-password": settings.RATE_LIMIT_PASSWORD_RESET,
     "/auth/reset-password": settings.RATE_LIMIT_PASSWORD_RESET,
 }
+# rutas por PREFIJO (endpoints con id variable: /teams/7/members, /admin/users/50)
+_ROUTE_PREFIX_LIMITS: list[tuple[str, int]] = [
+    ("/admin", settings.RATE_LIMIT_ADMIN),
+    ("/teams", settings.RATE_LIMIT_TEAMS),
+]
+
+
+def _route_limit(path: str) -> int | None:
+    """Límite de una ruta: exacto o por prefijo (antes del id dinámico)."""
+    exact = _ROUTE_LIMITS.get(path)
+    if exact is not None:
+        return exact
+    for prefix, limit in _ROUTE_PREFIX_LIMITS:
+        if path.startswith(prefix):
+            return limit
+    return None
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -39,8 +55,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         if settings.RATE_LIMIT_ENABLED:
             path = request.url.path
-            limit = _ROUTE_LIMITS.get(path)
-            if limit is not None and request.method in ("POST", "PATCH"):
+            limit = _route_limit(path)
+            if limit is not None and request.method in ("POST", "PATCH", "PUT", "DELETE"):
                 # Detrás de un proxy (nginx/Caddy) la IP real llega vía header
                 ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (
                     request.client.host if request.client else "unknown"

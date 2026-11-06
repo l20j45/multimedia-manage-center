@@ -10,6 +10,7 @@ from app import schemas, security
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import PasswordResetToken, User
+from app.routers.admin import registration_is_open_effective
 from app.services import email as email_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -18,20 +19,38 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 RESET_TTL_MINUTES = 30
 
 
+@router.get("/registration", response_model=schemas.RegistrationOut)
+def registration_status(db: Session = Depends(get_db)) -> schemas.RegistrationOut:
+    """¿El registro está abierto? Público: la pantalla de login adapta su tab."""
+    return schemas.RegistrationOut(open=registration_is_open_effective(db))
+
+
 @router.post("/register", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED)
 def register(
     data: schemas.UserCreate, background: BackgroundTasks, db: Session = Depends(get_db)
 ) -> User:
-    """Crea una cuenta nueva y envía un correo de bienvenida (si hay SMTP)."""
+    """Crea una cuenta nueva y envía un correo de bienvenida (si hay SMTP).
+
+    - El PRIMER usuario de la instalación queda como super admin.
+    - Si el admin cerró el registro, no se aceptan cuentas nuevas (403);
+      una BD sin usuarios siempre deja entrar a su primer admin.
+    """
+    if not registration_is_open_effective(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="El registro está cerrado: contacta al administrador",
+        )
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="El correo ya está registrado"
         )
 
+    first_user = db.query(User).count() == 0
     user = User(
         email=data.email,
         name=data.name,
         hashed_password=security.hash_password(data.password),
+        is_admin=first_user,
     )
     db.add(user)
     db.commit()

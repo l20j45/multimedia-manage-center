@@ -17,6 +17,41 @@ class User(Base):
     name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Super admin: el PRIMER usuario registrado de la instalación. Puede cerrar
+    # el registro, ver/gestionar cuentas y crear equipos para compartir.
+    is_admin: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa.text("0"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Team(Base):
+    """Equipo de trabajo: grupo de usuarios para compartir recursos.
+
+    Un recurso con visibility='team' es visible para los miembros de los
+    equipos en que el dueño está (solo lectura para el resto del equipo).
+    """
+
+    __tablename__ = "teams"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TeamMember(Base):
+    """Membresía usuario↔equipo (N:M); el dueño entra como role='owner'."""
+
+    __tablename__ = "team_members"
+    __table_args__ = (sa.UniqueConstraint("team_id", "user_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    team_id: Mapped[int] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    role: Mapped[str] = mapped_column(String(10), default="member", server_default="member")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -71,6 +106,9 @@ class MediaItem(Base):
     visibility: Mapped[str] = mapped_column(
         String(10), index=True, default="private", server_default="private"
     )  # private|team
+    # Equipo CONCRETO al que se comparte (null + visibility='team' = todos mis
+    # equipos; con team_id → SOLO ese equipo lo ve aunque cuentes con más).
+    team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"), index=True, nullable=True)
     rating: Mapped[int] = mapped_column(default=0, server_default=sa.text("0"))  # 0..5 estrellas
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

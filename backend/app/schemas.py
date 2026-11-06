@@ -26,8 +26,76 @@ class UserUpdate(BaseModel):
 class UserOut(UserBase):
     id: int
     is_active: bool
+    is_admin: bool = False
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RegistrationOut(BaseModel):
+    """Estado del registro abierto/cerrado (público: la pantalla de login)."""
+
+    open: bool
+
+
+# ------------------------------------------------------------------ equipos
+class TeamOut(BaseModel):
+    id: int
+    name: str
+    owner_id: int
+    role: str  # owner|member (del usuario actual respecto al equipo)
+    member_count: int
+
+
+class TeamCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class TeamMemberOut(BaseModel):
+    user_id: int
+    email: str
+    name: str | None
+    role: str  # owner|member
+    is_active: bool
+
+
+class TeamDetailOut(BaseModel):
+    id: int
+    name: str
+    owner_id: int
+    role: str
+    members: list[TeamMemberOut]
+
+
+class TeamAddMember(BaseModel):
+    email: EmailStr
+
+
+# ------------------------------------------------------------------ admin
+class AdminUserOut(BaseModel):
+    id: int
+    email: str
+    name: str | None
+    is_active: bool
+    is_admin: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminOverview(BaseModel):
+    users: list[AdminUserOut]
+    total: int
+    active_count: int
+    registration_open: bool
+
+
+class AdminDecision(BaseModel):
+    open: bool
+
+
+class AdminUserPatch(BaseModel):
+    is_active: bool | None = None
+    is_admin: bool | None = None
 
 
 class Token(BaseModel):
@@ -89,6 +157,7 @@ class MediaOut(BaseModel):
     duration_s: float | None
     has_thumb: bool
     visibility: str
+    team_id: int | None = None  # compartido a ese equipo concreto (null = mis equipos)
     rating: int
     deleted: bool
     created_at: datetime
@@ -115,6 +184,7 @@ class MediaOut(BaseModel):
             duration_s=item.duration_s,
             has_thumb=item.thumb_path is not None,
             visibility=getattr(item, "visibility", "private") or "private",
+            team_id=getattr(item, "team_id", None),
             rating=int(getattr(item, "rating", 0) or 0),
             deleted=getattr(item, "deleted_at", None) is not None,
             created_at=item.created_at,
@@ -132,6 +202,12 @@ class MediaUpdate(BaseModel):
     description: str | None = Field(None, max_length=2000)
     meta: dict | None = Field(None, description="Campos libres: {camera, proyecto, ...}")
     visibility: str | None = Field(None, description="private|team")
+    team_all: bool = Field(
+        False, description="visibility=team → abierto a TODOS mis equipos (team_id=NULL)"
+    )
+    team_id: int | None = Field(
+        None, description="visibility=team → compartido SOLO con ese equipo"
+    )
     rating: int | None = Field(None, ge=0, le=5, description="Estrellas 0-5")
 
 

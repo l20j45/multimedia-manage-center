@@ -32,6 +32,7 @@ from app.deps import get_current_user
 from app.models import Collection, CollectionItem, MediaItem, User
 from app.services import jobs as jobs_svc
 from app.services import media as media_svc
+from app.services import teams as teams_svc
 
 router = APIRouter(prefix="/media", tags=["media"])
 
@@ -63,12 +64,23 @@ def upload(
     tags: str = Form("", description="CSV de tags"),
     description: str = Form("", max_length=2000),
     visibility: str = Form("private"),
+    team_id: int | None = Form(None, description="Equipo concreto al que se comparte"),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> schemas.MediaOut:
-    """Sube un recurso (audio/imagen/video) con metadata opcional."""
+    """Sube un recurso (audio/imagen/video) con metadata opcional.
+
+    visibility='team' + team_id=N → lo ven los miembros del equipo N.
+    visibility='team' sin team_id → lo ven los compañeros de tus equipos.
+    """
     if visibility not in ("private", "team"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="visibility inválida")
+    if (
+        visibility == "team"
+        and team_id is not None
+        and not teams_svc.is_in_team(db, teams_svc.get_team_or_404(db, team_id), user)
+    ):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="No perteneces a ese equipo")
     original = file.filename or ""
     try:
         kind = media_svc.detect_kind(original)
@@ -93,6 +105,7 @@ def upload(
         tags=schemas.tags_csv(schemas.parse_tags(tags)),
         description=description.strip(),
         visibility=visibility,
+        team_id=team_id if visibility == "team" else None,
         filename=original[:255],
         path=rel_path,
         mime=mime[:100],
@@ -176,13 +189,16 @@ def list_media(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> schemas.MediaList:
-    """Lista/búsqueda. `scope=team` añade los recursos públicos del equipo."""
+    """Lista/búsqueda. `scope=team` añade los recursos públicos del equipo.
+
+    Equipos (no toda la instancia): un item visibility='team' es visible para
+    los usuarios que comparten ALGÚN equipo con su dueño.
+    """
     if scope == "mine":
         base = db.query(MediaItem).filter(MediaItem.owner_id == user.id)
     else:
         base = db.query(MediaItem).filter(
-            (MediaItem.owner_id == user.id)
-            | ((MediaItem.visibility == "team") & (MediaItem.owner_id != user.id))
+            (MediaItem.owner_id == user.id) | teams_svc.team_share_condition(db, user)
         )
     base = base.filter(
         MediaItem.deleted_at.is_(None) if not trash else MediaItem.deleted_at.is_not(None)
@@ -380,6 +396,16 @@ def update_item(
         if data.visibility not in ("private", "team"):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="visibility inválida")
         item.visibility = data.visibility
+    if data.visibility == "private":
+        item.team_id = None
+    elif data.visibility == "team" and data.team_all:
+        item.team_id = None  # abierto a TODOS mis equipos
+    elif data.team_id is not None:
+        # compartir a UN equipo concreto (requiere pertenecer a él)
+        if not teams_svc.is_in_team(db, teams_svc.get_team_or_404(db, data.team_id), user):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="No perteneces a ese equipo")
+        item.team_id = data.team_id
+        item.visibility = "team"
     if data.rating is not None:
         item.rating = int(data.rating)
     db.commit()
@@ -826,17 +852,16 @@ def _resolve_readable(
                 )
                 if item is not None:
                     return item
-                team_item = (
+                # visible para el equipo: condición de compartición (team_id concreto
+                # o cualquier equipo en común con el dueño)
+                shared = (
                     db.query(MediaItem)
-                    .filter(
-                        MediaItem.id == item_id,
-                        MediaItem.visibility == "team",
-                        MediaItem.deleted_at.is_(None),
-                    )
+                    .filter(MediaItem.id == item_id, MediaItem.deleted_at.is_(None))
+                    .filter(teams_svc.team_share_condition(db, user))
                     .first()
                 )
-                if team_item is not None:
-                    return team_item
+                if shared is not None:
+                    return shared
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas")
 
     # 2) enlace compartido
@@ -869,19 +894,17 @@ def _resolve_readable(
 def _item_for_read(
     db: Session, user: User, item_id: int, include_deleted: bool = False
 ) -> MediaItem:
-    """Item legible: PROPIO (aún en papelera si include_deleted) o del equipo (vivo)."""
+    """Item legible: PROPIO (aún en papelera si include_deleted) o de un
+    EQUIPO con quien comparte equipo (vivo)."""
     q = db.query(MediaItem).filter(MediaItem.id == item_id, MediaItem.owner_id == user.id)
     item = q.first() if include_deleted else q.filter(MediaItem.deleted_at.is_(None)).first()
-    if item is None:
-        item = (
+    if item is None and not include_deleted:
+        base = (
             db.query(MediaItem)
-            .filter(
-                MediaItem.id == item_id,
-                MediaItem.visibility == "team",
-                MediaItem.deleted_at.is_(None),
-            )
-            .first()
+            .filter(MediaItem.id == item_id, MediaItem.deleted_at.is_(None))
+            .filter(teams_svc.team_share_condition(db, user))
         )
+        item = base.first()
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Recurso no encontrado")
     return item
