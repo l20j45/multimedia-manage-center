@@ -1,13 +1,16 @@
-# Deploy de la Pi: API (imagen de Docker Hub) + Caddy (HTTPS + página web).
-# Caddy sirve la SPA (www/) y proxea las rutas de la API al contenedor api.
-# Todo configurable por el .env de ESTA carpeta (copiar .env.example).
+# Deploy de la Pi: API pública en su puerto + nginx (página web SPA + proxy).
+# TLS lo maneja Cloudflare (proxy naranja): al origen solo le llega HTTP en el 80.
+# Config por el .env de ESTA carpeta (copiar .env.example → .env; IMAGE_TAG + API_PORT).
+# La API también abre su propio puerto público (API_PORT) para apps/páginas directas.
 services:
   api:
     image: l20j45/biblioteca-recursos-multimedia-api:${IMAGE_TAG:-latest}
+    # Puerto público: apps de escritorio, APK y otras páginas del proyecto
+    # hablan directo con la API aquí (sincronización multi-dispositivo).
     ports:
-      - "127.0.0.1:8000:8000" # solo local: el público sale por Caddy
+      - "${API_PORT:-8000}:8000"
     env_file:
-      - backend.env             # tus SECRET_KEY/CORS/SMTP (gitignoreado)
+      - backend.env             # SECRET_KEY / CORS / SMTP (gitignoreado)
     environment:
       DATABASE_URL: sqlite:////app/data/app.db
       MEDIA_DIR: /app/data/uploads
@@ -15,19 +18,16 @@ services:
       - api-data:/app/data
     restart: unless-stopped
 
-  caddy:
-    image: caddy:2
+  web:
+    image: nginx:1.27-alpine
     ports:
-      - "80:80"                 # ACME challenge HTTP
-      - "443:443"               # HTTPS final
+      - "80:80"                 # origen HTTP; el HTTPS lo pone Cloudflare
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./www:/srv/www:ro       # la SPA compilada (deploy.sh la llena)
-      - caddy-data:/data        # certificados de Let's Encrypt
-      - caddy-config:/config
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./www:/usr/share/nginx/html:ro   # la SPA compilada (deploy.sh la llena)
+    depends_on:
+      - api
     restart: unless-stopped
 
 volumes:
   api-data:
-  caddy-data:
-  caddy-config:
