@@ -83,7 +83,12 @@ docker compose up               # desde la raíz
 2. **Cambias un modelo en `app/models.py`** → genera la migración Alembic
    correspondiente en el mismo commit.
 3. **No toques los límites de rate limiting** sin discutirlos: login 10/min,
-   register y forgot-password 5/min (config por `backend/.env`, vars `RATE_LIMIT_*`).
+   register y forgot-password 5/min, `/admin` 30/min y `/teams` 60/min por IP
+   (config por `backend/.env`, vars `RATE_LIMIT_*`).
+3b. **Roles**: el PRIMER usuario registrado es super admin (`users.is_admin`);
+   puede cerrar el registro (`/admin/registration`), gestionar usuarios y crear
+   equipos. El registro cerrado se guarda en `app_settings` (va con la BD y
+   sus backups, ver `docs/db-migraciones-y-backups.md`).
 4. **CORS**: `CORS_ORIGINS` (backend/.env) debe contener los orígenes en uso.
    Mantén coherente con `VITE_API_URL` del `.env` raíz.
 5. **Secrets**: `.env` gitignoreado (raíz y backend). Cada proyecto derivado
