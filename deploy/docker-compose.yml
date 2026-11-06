@@ -1,14 +1,13 @@
-# Deploy de la Pi: API pública en su puerto + nginx (página web SPA + proxy).
-# TLS lo maneja Cloudflare (proxy naranja): al origen solo le llega HTTP en el 80.
-# Config por el .env de ESTA carpeta (copiar .env.example → .env; IMAGE_TAG + API_PORT).
-# La API también abre su propio puerto público (API_PORT) para apps/páginas directas.
+# Deploy de la Pi: API pública :4010 + nginx web en :4011 (TLS lo maneja Cloudflare).
+# Config por el .env de ESTA carpeta (copiar .env.example → .env; IMAGE_TAG/API_PORT/WEB_PORT).
+# La API también abre su propio puerto público para apps/páginas directas.
 services:
   api:
     image: l20j45/biblioteca-recursos-multimedia-api:${IMAGE_TAG:-latest}
     # Puerto público: apps de escritorio, APK y otras páginas del proyecto
     # hablan directo con la API aquí (sincronización multi-dispositivo).
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "${API_PORT:-4010}:8000"
     env_file:
       - backend.env             # SECRET_KEY / CORS / SMTP (gitignoreado)
     environment:
@@ -21,7 +20,7 @@ services:
   web:
     image: nginx:1.27-alpine
     ports:
-      - "80:80"                 # origen HTTP; el HTTPS lo pone Cloudflare
+      - "${WEB_PORT:-4011}:80"  # SPA + proxy de la API interna (api:8000)
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./www:/usr/share/nginx/html:ro   # la SPA compilada (deploy.sh la llena)

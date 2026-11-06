@@ -61,22 +61,22 @@ bash deploy/deploy.sh pi@raspberrypi.local
 
 | Contenedor | Qué hace |
 |---|---|
-| `web` (nginx) | sirve `deploy/www/` (la SPA) y proxea `/auth /media /users /collections /settings /health` → `api:8000` |
-| `api` (Docker Hub) | FastAPI + SQLite + ffmpeg/Pillow; migraciones al arrancar; **puerto público `API_PORT`** (default 8000) |
+| `web` (nginx, `:4011` host → :80 interno) | sirve `deploy/www/` (la SPA) y proxea `/auth /media /users /collections /settings /health` → `api:8000` |
+| `api` (Docker Hub, `:4010` host) | FastAPI + SQLite + ffmpeg/Pillow; migraciones al arrancar; **puerto público `API_PORT=4010`** para apps/dispositivos directos |
 
 Los datos (BD `app.db` + `uploads/`) viven en el volumen **`api-data`**:
 sobreviven recreaciones de contenedores.
 
 ## API pública para la sincronización multi-dispositivo
 
-La API escucha directo en `${API_PORT}` (default **8000**) — para las
+La API escucha directo en `${API_PORT}` (default **4010**) — para las
 instancias locales del proyecto y otras páginas que quieran los endpoints
 sin pasar por nginx:
 
-- **Local/LAN**: `http://<ip-de-la-pi>:8000` (basta con abrir ese puerto en
+- **Local/LAN**: `http://<ip-de-la-pi>:4010` (basta con abrir ese puerto en
   la LAN; sin internet).
 - **Internet**: recomendado **Cloudflare Tunnel** (`cloudflared`) — versión
-  cero-abrir-puertos de tu router; o abre 8000 y, si va a andar público,
+  cero-abrir-puertos de tu router; o abre 4010 y, si va a andar público,
   mantén TLS adelante (via Cloudflare, proxy A/AAAA del subdominio, etc).
 - **CORS**: cada página/dispositivo extra debe estar listado en
   `CORS_ORIGINS` de `backend.env`; el token JWT hace la parte de seguridad
@@ -102,7 +102,15 @@ API y agrega ese dominio a `CORS_ORIGINS` en `backend.env`.
 ## Cloudflare: 3 ajustes recomendados
 
 1. **SSL/TLS mode → Full** (el origen es HTTP; *Full (strict)* fallaría).
-2. **Uploads grandes**: el plan free corta el body en 100 MB — para videos
+2. ⚠️ **Puertos y Cloudflare**: si la nube naranja (proxy) está activa,
+   Cloudflare solo habla con orígenes en los puertos estándar (80, 443, 8080…).
+   Con la web en `:4011` y la API en `:4010` tienes **dos** salidas:
+   - **Cloudflare Tunnel** (`cloudflared`) en la Pi, apuntando al `127.0.0.1:4011`
+     (web) y `127.0.0.1:4010` (API) → cero puertos abiertos, TLARM completo. *Opción recomendada.*
+   - **Nube gris (DNS only)** para el registro del dominio: las URLs llevan
+     `:4011`/`:4010` y llegan directo a la Pi (TLS lo pierdes salvo que añadas
+     tu propio certificado).
+3. **Uploads grandes**: el plan free corta el body en 100 MB — para videos
    grandes sube por LAN (o *bypass* del proxy para `/media` con una regla).
 3. **CORS**: todo sale del mismo dominio (`/` web y API), así que no hay
    problema de CORS del navegador; solo importa para la app de escritorio/APK
