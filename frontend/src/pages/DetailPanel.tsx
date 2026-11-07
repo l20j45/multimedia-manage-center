@@ -300,7 +300,7 @@ export default function DetailPanel({
           <p className="detail-id">{cur.mime} · {cur.kind}</p>
 
           <div className="detail-actions">
-            <a className="ghost" href={mediaUrl(cur.id, "file")} download={cur.filename} aria-label="Descargar">
+            <a className="ghost action-dl" href={mediaUrl(cur.id, "file")} download={cur.filename} aria-label="Descargar">
               ⬇ Descargar
             </a>
             {cur.kind === "video" && (
@@ -466,6 +466,22 @@ export default function DetailPanel({
                 </button>
               </>
             )}
+          </div>
+
+          {/* descarga grande bajo el preview — solo móvil (CSS la oculta en desktop) */}
+          <div className="detail-download">
+            <a
+              className="detail-dl-btn"
+              href={mediaUrl(cur.id, "file")}
+              download={cur.filename}
+              aria-label="Descargar archivo"
+            >
+              <span className="dl-ico" aria-hidden>⬇</span>
+              <span className="dl-texts">
+                <span className="dl-t">Descargar</span>
+                <span className="dl-s">{cur.filename} · {fmtSize(cur.size)}</span>
+              </span>
+            </a>
           </div>
           <p className="detail-hint">
             ← → navega · I marca In · O marca Out · Esc cierra
