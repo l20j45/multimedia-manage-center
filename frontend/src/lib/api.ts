@@ -23,6 +23,39 @@ export function setApiBase(url: string): string {
   return getApiBase();
 }
 
+/**
+ * Normaliza el `detail` de FastAPI a texto legible.
+ * FastAPI manda `detail` como string, como objeto de validación
+ * ({loc, msg, type}) o como LISTA de esos (422) — tal cual paciente un Error()
+ * a secas lo convierte en "[object Object]".
+ */
+function detailMensaje(detail: unknown): string | null {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail.map((d) => detailMensaje(d)).filter(Boolean) as string[];
+    return parts.length ? parts.join(" · ") : null;
+  }
+  if (detail && typeof detail === "object") {
+    const d = detail as Record<string, unknown>;
+    const msg = typeof d.msg === "string" ? d.msg : null;
+    const loc = Array.isArray(d.loc) ? d.loc.filter((p) => p !== "body").join(".") : "";
+    if (msg) return loc ? `${loc}: ${msg}` : msg;
+    try {
+      const s = JSON.stringify(d);
+      return s.length <= 200 ? s : s.slice(0, 200) + "…";
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/** Error listo para mostrar; parsea el body si trae `detail` de FastAPI. */
+function errorDeRespuesta(data: unknown, fallback: string): Error {
+  const detail = (data as { detail?: unknown })?.detail;
+  return new Error(detailMensaje(detail) ?? fallback);
+}
+
 
 export interface User {
   id: number;
@@ -46,7 +79,8 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+// helper HTTP interno; exportado para tests (vitest) que lo mockean con fetch
+export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   // Headers del caller primero; request() solo AÑADE (no pisa) Content-Type
   // ni Authorization: el login necesita application/x-www-form-urlencoded y
   // el resto JSON (#bug 422 en /auth/login cuando el caller sobreescribía).
@@ -68,7 +102,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error((data as { detail?: string }).detail ?? `Error ${res.status}`);
+    throw errorDeRespuesta(data, `Error ${res.status}`);
   }
   return data as T;
 }
@@ -321,9 +355,13 @@ export function uploadMedia(
       }
     };
     xhr.onload = () => {
-      const data = JSON.parse(xhr.responseText || "{}") as MediaItem & { detail?: string };
-      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-      else reject(new Error(data.detail ?? `Error ${xhr.status}`));
+      try {
+        const data = JSON.parse(xhr.responseText || "{}") as unknown;
+        if (xhr.status >= 200 && xhr.status < 300) resolve(data as MediaItem);
+        else reject(errorDeRespuesta(data, `Error ${xhr.status}`));
+      } catch {
+        reject(new Error(`Error ${xhr.status}`));
+      }
     };
     xhr.onerror = () => reject(new Error("Error de red al subir"));
     xhr.send(form);
