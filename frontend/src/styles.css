@@ -1312,7 +1312,8 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
 
   /* sidebar → drawer de navegación */
   .shell.nav-open { overflow: hidden; }
-  .nav-backdrop { display: block; }
+  /* el backdrop solo existe con el menú abierto (si no, bloquearía toda la app) */
+  .shell.nav-open .nav-backdrop { display: block; }
   .sidebar {
     position: fixed;
     z-index: 65;
