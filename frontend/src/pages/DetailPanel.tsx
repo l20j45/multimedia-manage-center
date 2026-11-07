@@ -86,6 +86,21 @@ export default function DetailPanel({
   const [trimOut, setTrimOut] = useState<number | null>(null);
   const [trimBusy, setTrimBusy] = useState(false);
 
+  // Swipe horizontal en el preview (móvil): navega al recurso anterior/siguiente
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  function onTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0];
+    touchStart.current = { x: t.clientX, y: t.clientY };
+  }
+  function onTouchEnd(e: React.TouchEvent) {
+    if (!touchStart.current || !onNavigate) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStart.current.x;
+    const dy = t.clientY - touchStart.current.y;
+    touchStart.current = null;
+    if (Math.abs(dx) > 64 && Math.abs(dx) > Math.abs(dy) * 1.6) onNavigate(dx < 0 ? 1 : -1);
+  }
+
   useEffect(() => {
     setCur(item);
     setTitleDraft(item.title);
@@ -429,7 +444,11 @@ export default function DetailPanel({
 
         {/* ---------- panel derecho: CONTENIDO + NOTAS ---------- */}
         <div className="detail-content">
-          <div className="detail-preview">
+          <div
+            className="detail-preview"
+            onTouchStart={onTouchStart}
+            onTouchEnd={onTouchEnd}
+          >
             {cur.kind === "video" && (
               <video key={cur.path} controls src={mediaUrl(cur.id, "file")} ref={videoRef} />
             )}
@@ -437,6 +456,16 @@ export default function DetailPanel({
               <audio key={cur.path} controls src={mediaUrl(cur.id, "file")} ref={audioRef} />
             )}
             {cur.kind === "image" && <img src={mediaUrl(cur.id, "file")} alt={cur.title} />}
+            {onNavigate && (
+              <>
+                <button className="detail-nav prev" onClick={() => onNavigate(-1)} aria-label="Recurso anterior" title="Recurso anterior">
+                  ‹
+                </button>
+                <button className="detail-nav next" onClick={() => onNavigate(1)} aria-label="Recurso siguiente" title="Recurso siguiente">
+                  ›
+                </button>
+              </>
+            )}
           </div>
           <p className="detail-hint">
             ← → navega · I marca In · O marca Out · Esc cierra

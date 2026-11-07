@@ -103,6 +103,10 @@ export default function HomePage({
   const [view, setView] = useState<"grid" | "list">("grid");
   const [minRating, setMinRating] = useState(false);
 
+  // Menú lateral: drawer en móvil (menuOpen) y colapso opcional en escritorio
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [sideHidden, setSideHidden] = useState(false);
+
   // Subida
   const [uploadOpen, setUploadOpen] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -190,8 +194,7 @@ export default function HomePage({
 
   // Detalle / duplicados / edición
   const [detail, setDetail] = useState<MediaItem | null>(null);
-  const [editing, setEditing] = useState<MediaItem | null>(null);
-  const [editDraft, setEditDraft] = useState({
+  const [editing, setEditing] = useState<MediaItem | null>(null);  const [editDraft, setEditDraft] = useState({
     title: "",
     tags: "",
     description: "",
@@ -790,7 +793,8 @@ export default function HomePage({
         return;
       }
       if (e.key === "Escape") {
-        if (helpOpen) setHelpOpen(false);
+        if (menuOpen) setMenuOpen(false);
+        else if (helpOpen) setHelpOpen(false);
         else if (addItemFor) setAddItemFor(null);
         else if (editing) setEditing(null);
         else if (profileOpen) setProfileOpen(false);
@@ -803,7 +807,7 @@ export default function HomePage({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail, addItemFor, editing, profileOpen, uploadOpen, dupesOpen, selectedIds, helpOpen]);
+  }, [detail, addItemFor, editing, profileOpen, uploadOpen, dupesOpen, selectedIds, helpOpen, menuOpen]);
 
   /* puntapapel: Ctrl+V pegar directamente */
   useEffect(() => {
@@ -858,9 +862,13 @@ export default function HomePage({
   }
 
   /* --------------------------------------------------------------- render */
+  const fabHidden =
+    uploadOpen || editing || addItemFor !== null || dupesOpen || detail !== null ||
+    profileOpen || teamsOpen || adminOpen || helpOpen;
+
   return (
     <div
-      className="shell"
+      className={`shell${menuOpen ? " nav-open" : ""}${sideHidden ? " side-hidden" : ""}`}
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);
@@ -877,13 +885,22 @@ export default function HomePage({
         </div>
       )}
 
-      {/* ==================== SIDEBAR ==================== */}
-      <aside className="sidebar">
+      {/* ==================== SIDEBAR (drawer en móvil) ==================== */}
+      <div className="nav-backdrop" onClick={() => setMenuOpen(false)} aria-hidden />
+      <aside className={`sidebar${menuOpen ? " open" : ""}`}>
         <div className="brand">
           <span className="brand-stripes" aria-hidden>
             ▮▮▮
           </span>
           <span>Biblioteca <b>MM</b></span>
+          <button
+            className="brand-close"
+            onClick={() => setMenuOpen(false)}
+            aria-label="Cerrar menú"
+            title="Cerrar menú"
+          >
+            ✕
+          </button>
         </div>
 
         <nav className="snav">
@@ -894,6 +911,7 @@ export default function HomePage({
               onClick={() => {
                 setNav(t.key);
                 if (t.key !== "trash" && t.key !== "collections") setActiveTag(null);
+                setMenuOpen(false);
               }}
             >
               {t.icon} {t.label}
@@ -908,13 +926,17 @@ export default function HomePage({
             onClick={() => {
               setMinRating((v) => !v);
               setNav("all");
+              setMenuOpen(false);
             }}
           >
             ★ Favoritos
           </button>
           <button
             className={`snav-item${scope === "team" ? " active" : ""}`}
-            onClick={() => setScope((s) => (s === "team" ? "mine" : "team"))}
+            onClick={() => {
+              setScope((s) => (s === "team" ? "mine" : "team"));
+              setMenuOpen(false);
+            }}
             title="Biblioteca propia + recursos del equipo"
           >
             👥 Del equipo
@@ -931,6 +953,7 @@ export default function HomePage({
               onClick={() => {
                 setSelectedCol(c);
                 setNav("all");
+                setMenuOpen(false);
               }}
             >
               {c.is_project ? "🎬" : "📚"} {c.name}
@@ -941,24 +964,54 @@ export default function HomePage({
 
         <div className="snav-section">
           <p className="snav-label">Gestión</p>
-          <button className="snav-item" onClick={() => setTeamsOpen(true)}>
+          <button
+            className="snav-item"
+            onClick={() => {
+              setTeamsOpen(true);
+              setMenuOpen(false);
+            }}
+          >
             👥 Equipos
           </button>
           {user.is_admin && (
-            <button className="snav-item" onClick={() => setAdminOpen(true)}>
+            <button
+              className="snav-item"
+              onClick={() => {
+                setAdminOpen(true);
+                setMenuOpen(false);
+              }}
+            >
               🛡Administración
             </button>
           )}
         </div>
 
         <div className="snav-bottom">
-          <button className="snav-item" onClick={() => setHelpOpen(true)}>
+          <button
+            className="snav-item"
+            onClick={() => {
+              setHelpOpen(true);
+              setMenuOpen(false);
+            }}
+          >
             ⌨️ Atajos
           </button>
-          <button className="snav-item" onClick={openDuplicates}>
+          <button
+            className="snav-item"
+            onClick={() => {
+              openDuplicates();
+              setMenuOpen(false);
+            }}
+          >
             👯 Duplicados
           </button>
-          <button className="snav-item" onClick={() => setProfileOpen(true)}>
+          <button
+            className="snav-item"
+            onClick={() => {
+              setProfileOpen(true);
+              setMenuOpen(false);
+            }}
+          >
             👤 {user.name || "Perfil"}
             {user.is_admin && (
               <span className="chip chip-admin" aria-label="Super admin">
@@ -972,6 +1025,22 @@ export default function HomePage({
       {/* ==================== MAIN ==================== */}
       <main className="main">
         <div className="topbar-main">
+          <button
+            className="icon-btn menu-btn"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Abrir menú"
+            title="Abrir menú"
+          >
+            ☰
+          </button>
+          <button
+            className="icon-btn collapse-btn"
+            onClick={() => setSideHidden((v) => !v)}
+            aria-label={sideHidden ? "Mostrar menú" : "Ocultar menú"}
+            title={sideHidden ? "Mostrar menú" : "Ocultar menú"}
+          >
+            {sideHidden ? "»" : "«"}
+          </button>
           <input
             className="search"
             ref={searchInput}
@@ -980,8 +1049,9 @@ export default function HomePage({
             onChange={(e) => setQuery(e.target.value)}
             aria-label="Buscar"
           />
-          <button className="primary" onClick={() => setUploadOpen(true)}>
-            ⇪ Importar recurso
+          <button className="primary" onClick={() => setUploadOpen(true)} title="Importar recurso">
+            <span className="btn-ico" aria-hidden>⇪</span>
+            <span className="btn-text">Importar recurso</span>
           </button>
         </div>
 
@@ -1274,8 +1344,15 @@ export default function HomePage({
           </div>
         ) : (
           <div className="lib">
-            {loading && <p className="loading">Cargando…</p>}
+            {loading && items.length > 0 && <p className="sub count">Cargando más…</p>}
             {listError && <p className="error">{listError}</p>}
+            {loading && items.length === 0 && (
+              <div className="media-grid" aria-hidden>
+                {Array.from({ length: 8 }, (_, i) => (
+                  <div className="skeleton-card" key={i} />
+                ))}
+              </div>
+            )}
             {!loading && !listError && items.length === 0 && (
               <div className="empty">
                 <p>
@@ -1364,6 +1441,16 @@ export default function HomePage({
           </div>
         )}
       </main>
+
+      {/* FAB móvil: importar siempre al alcance del pulgar */}
+      <button
+        className={`fab${fabHidden ? " hidden" : ""}`}
+        onClick={() => setUploadOpen(true)}
+        aria-label="Importar recurso"
+        title="Importar recurso"
+      >
+        ⇪
+      </button>
 
       {/* ==================== OVERLAYS ==================== */}
       <div className="toast-stack" aria-live="polite">
@@ -1548,27 +1635,63 @@ export default function HomePage({
           <form className="card upload-card" onClick={(e) => e.stopPropagation()} onSubmit={handleUpload}>
             <h2>Subir recurso</h2>
             <p className="sub">Audio, imagen o clip de vídeo</p>
-            <input
-              type="file"
-              ref={fileInput}
-              multiple
-              accept="image/*,audio/*,video/*"
-              onChange={(e) => {
-                const fs = Array.from(e.target.files ?? []);
-                setSelectedFiles(fs);
-                if (fs.length === 1 && !title.trim()) {
-                  setTitle(fs[0].name.replace(/\.[^.]+$/, ""));
-                }
-              }}
-            />
+            <label className={`file-picker${uploading ? " busy" : ""}`} title="Elegir archivos">
+              <input
+                type="file"
+                ref={fileInput}
+                multiple
+                accept="image/*,audio/*,video/*"
+                disabled={uploading}
+                onChange={(e) => {
+                  const fs = Array.from(e.target.files ?? []);
+                  setSelectedFiles(fs);
+                  if (fs.length === 1 && !title.trim()) {
+                    setTitle(fs[0].name.replace(/\.[^.]+$/, ""));
+                  }
+                }}
+              />
+              <span className="fp-icon" aria-hidden>⇪</span>
+              <span className="fp-text">
+                {selectedFiles.length === 0 ? "Toca para elegir archivos" : "Toca para cambiar los archivos"}
+              </span>
+              <span className="fp-sub">
+                audio, imagen o vídeo · en PC también arrastra aquí o pega con Ctrl+V
+              </span>
+            </label>
+            {selectedFiles.map((f, i) => (
+              <div className="file-chip" key={`${f.name}-${i}`}>
+                <span className="fc-name">{f.name}</span>
+                <span className="fc-size">{fmtSize(f.size)}</span>
+                <button
+                  type="button"
+                  className="ghost fc-x"
+                  disabled={uploading}
+                  onClick={() => {
+                    const next = selectedFiles.filter((_, i2) => i2 !== i);
+                    setSelectedFiles(next);
+                    if (next.length === 1 && f.name.replace(/\.[^.]+$/, "") === title) {
+                      setTitle(next[0].name.replace(/\.[^.]+$/, ""));
+                    }
+                    if (next.length === 0 && fileInput.current) fileInput.current.value = "";
+                  }}
+                  aria-label={`Quitar ${f.name}`}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
             {selectedFiles.length > 1 && (
               <p className="sub">
                 {selectedFiles.length} archivos: se suben con su nombre como título y comparten
                 tags/descripción/visibilidad. Los videos se comprimen en background.
               </p>
             )}
-            <p className="label">Título</p>
-            <input placeholder="Título del recurso" value={title} onChange={(e) => setTitle(e.target.value)} />
+            {selectedFiles.length <= 1 && (
+              <>
+                <p className="label">Título</p>
+                <input placeholder="Título del recurso" value={title} onChange={(e) => setTitle(e.target.value)} />
+              </>
+            )}
             <p className="label">Tags (separados por coma)</p>
             <input placeholder="intro, logo, b-roll..." value={tagsText} onChange={(e) => setTagsText(e.target.value)} />
             <p className="label">Descripción / notas</p>
